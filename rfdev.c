@@ -48,13 +48,13 @@ static int rfdev_remove(struct i2c_client *client)
 }
 
 static const struct of_device_id rfdev_of_match[] = {
-        { .compatible = "apertus,pic16f1718-rf-interface" },
+        { .compatible = "apertus,pic-rf-interface" },
         { },
 };
 MODULE_DEVICE_TABLE(of, rfdev_of_match);
 
 static const struct i2c_device_id rfdev_idtable[] = {
-        { "pic16f1718-rf-interface", 0 },
+        { "pic-rf-interface", 0 },
         { },
 };
 MODULE_DEVICE_TABLE(i2c, rfdev_idtable);
