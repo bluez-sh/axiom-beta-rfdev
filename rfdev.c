@@ -21,6 +21,8 @@ static int rfdev_probe(struct i2c_client *client,
 {
         struct rfdev_device *dev;
 
+        printk(KERN_DEBUG "%s: probe called\n", DEV_NAME);
+
         if (!i2c_check_functionality(client->adapter,
                 I2C_FUNC_SMBUS_BYTE_DATA | I2C_FUNC_SMBUS_WORD_DATA |
                 I2C_FUNC_SMBUS_I2C_BLOCK)) {
@@ -45,6 +47,7 @@ static int rfdev_probe(struct i2c_client *client,
 static int rfdev_remove(struct i2c_client *client)
 {
         struct rfdev_device *dev = i2c_get_clientdata(client);
+        printk(KERN_DEBUG "%s: remove called\n", DEV_NAME);
         return 0;
 }
 
