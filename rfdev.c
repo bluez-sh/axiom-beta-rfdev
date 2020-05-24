@@ -12,14 +12,56 @@ MODULE_DESCRIPTION("A character driver used to program/debug routing fabrics \
 in AXIOM Beta main board");
 MODULE_VERSION("0.1");
 
-struct rfdev_device {
+static const unsigned short int pic_num_addrs        = 32;
+static const unsigned short int pic_num_ranges       = 2;
+static const unsigned short int pic_addr_ranges[][2] = {
+        { 0x40, 0x10 }, { 0x60, 0x10 },
+};
+
+struct rfdev_client {
         struct i2c_client *client;
 };
 
-static int rfdev_probe(struct i2c_client *client,
-                const struct i2c_device_id *id)
+struct rfdev_device {
+        unsigned short int num_clients;
+        struct rfdev_client client[];
+};
+
+static int rfdev_make_dummy_client(struct rfdev_device *rfdev,
+                                   unsigned short int addr)
 {
-        struct rfdev_device *dev;
+        struct i2c_client *base_client, *dummy_client;
+        struct device *dev;
+
+        base_client = rfdev->client[0].client;
+        dev = &base_client->dev;
+
+        dummy_client = i2c_new_dummy(base_client->adapter, addr);
+        if (!dummy_client) {
+                dev_err(dev, "address 0x%02x unavailable\n", addr);
+                return -EADDRINUSE;
+        }
+
+        rfdev->client[rfdev->num_clients++].client = dummy_client;
+        return 0;
+}
+
+static void rfdev_remove_dummy_clients(struct rfdev_device *rfdev)
+{
+        int i;
+
+        for (i = 1; i < rfdev->num_clients; i++)
+                i2c_unregister_device(rfdev->client[i].client);
+}
+
+static int rfdev_probe(struct i2c_client *client,
+                       const struct i2c_device_id *id)
+{
+        struct device *dev = &client->dev;
+        struct rfdev_device *rfdev;
+        size_t rfdev_size;
+        unsigned int i, base, idx;
+        int err;
 
         printk(KERN_DEBUG "%s: probe called\n", DEV_NAME);
 
@@ -32,22 +74,39 @@ static int rfdev_probe(struct i2c_client *client,
                 return -ENODEV;
         }
 
-        dev = kzalloc(sizeof(struct rfdev_device), GFP_KERNEL);
-        if (!dev) {
-                printk(KERN_ERR "%s: no memory\n", __func__);
+        rfdev_size = sizeof(*rfdev) + pic_num_addrs * sizeof(struct rfdev_client);
+        rfdev = devm_kzalloc(dev, rfdev_size, GFP_KERNEL);
+        if (!rfdev)
                 return -ENOMEM;
+
+        rfdev->client[0].client = client;
+        rfdev->num_clients = 1;
+
+        for (i = 0; i < pic_num_ranges; i++) {
+                base = pic_addr_ranges[i][0];
+                for (idx = 0; idx < pic_addr_ranges[i][1]; idx++) {
+                        if (i == 0 && idx == 0)
+                                continue;
+                        err = rfdev_make_dummy_client(rfdev, base + idx);
+                        if (err) {
+                                rfdev_remove_dummy_clients(rfdev);
+                                return err;
+                        }
+                }
         }
 
-        dev->client = client;
-        i2c_set_clientdata(client, dev);
+        i2c_set_clientdata(client, rfdev);
 
         return 0;
 }
 
 static int rfdev_remove(struct i2c_client *client)
 {
-        struct rfdev_device *dev = i2c_get_clientdata(client);
+        struct rfdev_device *rfdev = i2c_get_clientdata(client);
+
         printk(KERN_DEBUG "%s: remove called\n", DEV_NAME);
+        rfdev_remove_dummy_clients(rfdev);
+
         return 0;
 }
 
