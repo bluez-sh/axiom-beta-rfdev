@@ -12,11 +12,7 @@ MODULE_DESCRIPTION("A character driver used to program/debug routing fabrics \
 in AXIOM Beta main board");
 MODULE_VERSION("0.1");
 
-static const unsigned short int pic_num_addrs        = 32;
-static const unsigned short int pic_num_ranges       = 2;
-static const unsigned short int pic_addr_ranges[][2] = {
-        { 0x40, 0x10 }, { 0x60, 0x10 },
-};
+static const unsigned short int pic_num_addrs = 16;
 
 struct rfdev_client {
         struct i2c_client *client;
@@ -27,14 +23,16 @@ struct rfdev_device {
         struct rfdev_client client[];
 };
 
-static int rfdev_make_dummy_client(struct rfdev_device *rfdev,
-                                   unsigned short int addr)
+static int rfdev_make_dummy_client(struct rfdev_device *rfdev, 
+                                   unsigned int index)
 {
         struct i2c_client *base_client, *dummy_client;
         struct device *dev;
+        unsigned short int addr;
 
         base_client = rfdev->client[0].client;
         dev = &base_client->dev;
+        addr = base_client->addr + index;
 
         dummy_client = i2c_new_dummy(base_client->adapter, addr);
         if (!dummy_client) {
@@ -60,7 +58,7 @@ static int rfdev_probe(struct i2c_client *client,
         struct device *dev = &client->dev;
         struct rfdev_device *rfdev;
         size_t rfdev_size;
-        unsigned int i, base, idx;
+        unsigned int i;
         int err;
 
         printk(KERN_DEBUG "%s: probe called\n", DEV_NAME);
@@ -82,16 +80,11 @@ static int rfdev_probe(struct i2c_client *client,
         rfdev->client[0].client = client;
         rfdev->num_clients = 1;
 
-        for (i = 0; i < pic_num_ranges; i++) {
-                base = pic_addr_ranges[i][0];
-                for (idx = 0; idx < pic_addr_ranges[i][1]; idx++) {
-                        if (i == 0 && idx == 0)
-                                continue;
-                        err = rfdev_make_dummy_client(rfdev, base + idx);
-                        if (err) {
-                                rfdev_remove_dummy_clients(rfdev);
-                                return err;
-                        }
+        for (i = 1; i < pic_num_addrs; i++) {
+                err = rfdev_make_dummy_client(rfdev, i);
+                if (err) {
+                        rfdev_remove_dummy_clients(rfdev);
+                        return err;
                 }
         }
 
