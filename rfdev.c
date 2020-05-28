@@ -23,7 +23,7 @@ struct rfdev_device {
         struct rfdev_client client[];
 };
 
-static int rfdev_make_dummy_client(struct rfdev_device *rfdev, 
+static int rfdev_make_dummy_client(struct rfdev_device *rfdev,
                                    unsigned int index)
 {
         struct i2c_client *base_client, *dummy_client;
@@ -59,13 +59,13 @@ static int rfdev_probe(struct i2c_client *client,
         struct rfdev_device *rfdev;
         size_t rfdev_size;
         unsigned int i;
-        int err;
+        int err, val;
 
         printk(KERN_DEBUG "%s: probe called\n", DEV_NAME);
 
         if (!i2c_check_functionality(client->adapter,
-                I2C_FUNC_SMBUS_BYTE_DATA | I2C_FUNC_SMBUS_WORD_DATA |
-                I2C_FUNC_SMBUS_I2C_BLOCK)) {
+                I2C_FUNC_SMBUS_BYTE | I2C_FUNC_SMBUS_BYTE_DATA |
+                I2C_FUNC_SMBUS_WORD_DATA | I2C_FUNC_SMBUS_I2C_BLOCK)) {
                 printk(KERN_ERR
                         "%s: required i2c functionality is not supported\n",
                         __func__);
@@ -89,6 +89,18 @@ static int rfdev_probe(struct i2c_client *client,
         }
 
         i2c_set_clientdata(client, rfdev);
+
+        /* Test read/write from/to the PIC */
+        i2c_smbus_write_byte(client, 0xaa);
+        val = i2c_smbus_read_byte(client);
+        if (val < 0)
+                return val;
+
+        if ((val & 0xff) == 0xaa)
+                printk(KERN_DEBUG "%s: read/write test passed\n", __func__);
+        else
+                printk(KERN_DEBUG "%s: read/write test failed, \
+                                received byte 0x%02x\n", __func__, val);
 
         return 0;
 }
