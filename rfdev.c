@@ -4,7 +4,7 @@
 #include <linux/i2c.h>
 #include <linux/slab.h>
 
-#define DEV_NAME "rfdev"
+#include "rfdev.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Swaraj Hota");
@@ -12,7 +12,8 @@ MODULE_DESCRIPTION("A character driver used to program/debug routing fabrics \
 in AXIOM Beta main board");
 MODULE_VERSION("0.1");
 
-static const unsigned short int pic_num_addrs = 16;
+#define DEV_NAME "rfdev"
+#define PIC_NUM_ADDRS 16
 
 struct rfdev_client {
         struct i2c_client *client;
@@ -21,6 +22,11 @@ struct rfdev_client {
 struct rfdev_device {
         unsigned short int num_clients;
         struct rfdev_client client[];
+};
+
+static struct i2c_client *get_i2c_client(struct rfdev_device *rfdev, 
+                                         unsigned int pic_opr) {
+        return rfdev->client[pic_opr].client; 
 };
 
 static int rfdev_make_dummy_client(struct rfdev_device *rfdev,
@@ -72,7 +78,7 @@ static int rfdev_probe(struct i2c_client *client,
                 return -ENODEV;
         }
 
-        rfdev_size = sizeof(*rfdev) + pic_num_addrs * sizeof(struct rfdev_client);
+        rfdev_size = sizeof(*rfdev) + PIC_NUM_ADDRS * sizeof(struct rfdev_client);
         rfdev = devm_kzalloc(dev, rfdev_size, GFP_KERNEL);
         if (!rfdev)
                 return -ENOMEM;
@@ -80,7 +86,7 @@ static int rfdev_probe(struct i2c_client *client,
         rfdev->client[0].client = client;
         rfdev->num_clients = 1;
 
-        for (i = 1; i < pic_num_addrs; i++) {
+        for (i = 1; i < PIC_NUM_ADDRS; i++) {
                 err = rfdev_make_dummy_client(rfdev, i);
                 if (err) {
                         rfdev_remove_dummy_clients(rfdev);
