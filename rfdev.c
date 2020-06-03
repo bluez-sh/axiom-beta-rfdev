@@ -97,8 +97,8 @@ static int rfdev_probe(struct i2c_client *client,
         i2c_set_clientdata(client, rfdev);
 
         /* Test read/write from/to the PIC */
-        i2c_smbus_write_byte(client, 0xaa);
-        val = i2c_smbus_read_byte(client);
+        i2c_smbus_write_byte(get_i2c_client(rfdev, PIC_WR_BUF_DATA), 0xaa);
+        val = i2c_smbus_read_byte(get_i2c_client(rfdev, PIC_RD_BUF_DATA));
         if (val < 0)
                 return val;
 
