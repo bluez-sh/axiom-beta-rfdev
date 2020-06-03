@@ -15,6 +15,8 @@ MODULE_VERSION("0.1");
 #define DEV_NAME "rfdev"
 #define PIC_NUM_ADDRS 16
 
+static struct device *root_dev = NULL;
+
 struct rfdev_client {
         struct i2c_client *client;
 };
@@ -24,9 +26,27 @@ struct rfdev_device {
         struct rfdev_client client[];
 };
 
-static struct i2c_client *get_i2c_client(struct rfdev_device *rfdev, 
-                                         unsigned int pic_opr) {
-        return rfdev->client[pic_opr].client; 
+static ssize_t rfdev_show_idcode(struct device *dev,
+                                 struct device_attribute *attr, char *buf)
+{
+        return scnprintf(buf, 10, "test\n");
+}
+
+static DEVICE_ATTR(idcode, 0444, rfdev_show_idcode, NULL);
+
+static struct attribute *dev_attrs[] = {
+        &dev_attr_idcode.attr,
+        NULL,
+};
+
+static struct attribute_group dev_attr_group = {
+        .attrs = dev_attrs,
+};
+
+static struct i2c_client *get_i2c_client(struct rfdev_device *rfdev,
+                                         unsigned int pic_opr)
+{
+        return rfdev->client[pic_opr].client;
 };
 
 static int rfdev_make_dummy_client(struct rfdev_device *rfdev,
@@ -78,7 +98,8 @@ static int rfdev_probe(struct i2c_client *client,
                 return -ENODEV;
         }
 
-        rfdev_size = sizeof(*rfdev) + PIC_NUM_ADDRS * sizeof(struct rfdev_client);
+        rfdev_size = sizeof(*rfdev) +
+                        PIC_NUM_ADDRS * sizeof(struct rfdev_client);
         rfdev = devm_kzalloc(dev, rfdev_size, GFP_KERNEL);
         if (!rfdev)
                 return -ENOMEM;
@@ -108,6 +129,15 @@ static int rfdev_probe(struct i2c_client *client,
                 printk(KERN_DEBUG "%s: read/write test failed, \
                                 received byte 0x%02x\n", __func__, val);
 
+        /* Create sysfs entries */
+        root_dev = root_device_register(DEV_NAME);
+        if (!dev)
+                return -ENOMEM;
+
+        err = sysfs_create_group(&root_dev->kobj, &dev_attr_group);
+        if (err)
+                printk(KERN_ERR "%s: sysfs_create_group failure\n", __func__);
+
         return 0;
 }
 
@@ -117,6 +147,8 @@ static int rfdev_remove(struct i2c_client *client)
 
         printk(KERN_DEBUG "%s: remove called\n", DEV_NAME);
         rfdev_remove_dummy_clients(rfdev);
+        if (root_dev)
+                root_device_unregister(root_dev);
 
         return 0;
 }
