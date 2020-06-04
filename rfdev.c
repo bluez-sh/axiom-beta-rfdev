@@ -26,10 +26,39 @@ struct rfdev_device {
         struct rfdev_client client[];
 };
 
+static struct i2c_client *get_i2c_client(struct rfdev_device *rfdev,
+                                         unsigned int pic_opr)
+{
+        return rfdev->client[pic_opr].client;
+};
+
 static ssize_t rfdev_show_idcode(struct device *dev,
                                  struct device_attribute *attr, char *buf)
 {
-        return scnprintf(buf, 10, "test\n");
+        struct i2c_client *client;
+        struct rfdev_device *rfdev;
+        uint32_t idcode = 0;
+        int i;
+
+        client = dev_get_drvdata(dev);
+        rfdev  = i2c_get_clientdata(client);
+
+        i2c_smbus_write_byte(get_i2c_client(rfdev, PIC_WR_TMS_OUT), 0b11111111);
+        i2c_smbus_write_byte_data(get_i2c_client(rfdev, PIC_WR_TMS_OUT_LEN),
+                                        5, 0b00110); // goto Shift-IR
+        i2c_smbus_write_byte(get_i2c_client(rfdev, PIC_WR_TDI_OUT), 0b11100000);
+        i2c_smbus_write_byte_data(get_i2c_client(rfdev, PIC_WR_TMS_OUT_LEN),
+                                        4, 0b0011); // goto Shift-DR
+        for (i = 0; i < 4; i++) {
+                int val = i2c_smbus_read_byte(
+                                get_i2c_client(rfdev, PIC_RD_TDO_IN_CONT));
+                if (val < 0)
+                        return val;
+                idcode |= (val << (i * 8));
+        }
+        i2c_smbus_write_byte(get_i2c_client(rfdev, PIC_WR_TMS_OUT), 0b11111111);
+
+        return scnprintf(buf, PAGE_SIZE, "0x%08x\n", idcode);
 }
 
 static DEVICE_ATTR(idcode, 0444, rfdev_show_idcode, NULL);
@@ -41,12 +70,6 @@ static struct attribute *dev_attrs[] = {
 
 static struct attribute_group dev_attr_group = {
         .attrs = dev_attrs,
-};
-
-static struct i2c_client *get_i2c_client(struct rfdev_device *rfdev,
-                                         unsigned int pic_opr)
-{
-        return rfdev->client[pic_opr].client;
 };
 
 static int rfdev_make_dummy_client(struct rfdev_device *rfdev,
@@ -133,7 +156,7 @@ static int rfdev_probe(struct i2c_client *client,
         root_dev = root_device_register(DEV_NAME);
         if (!dev)
                 return -ENOMEM;
-
+        dev_set_drvdata(root_dev, client);
         err = sysfs_create_group(&root_dev->kobj, &dev_attr_group);
         if (err)
                 printk(KERN_ERR "%s: sysfs_create_group failure\n", __func__);
