@@ -45,7 +45,7 @@ static ssize_t idcode_show(struct device *dev,
 	i2c_smbus_write_byte(get_i2c_client(rfdev, PIC_WR_TMS_OUT), 0b11111111);
 	i2c_smbus_write_byte_data(get_i2c_client(rfdev, PIC_WR_TMS_OUT_LEN),
 					5, 0b00110);	// goto Shift-IR
-	i2c_smbus_write_byte(get_i2c_client(rfdev, PIC_WR_TDI_OUT), 0b11100000);
+	i2c_smbus_write_byte(get_i2c_client(rfdev, PIC_WR_TDI_OUT), RF_IDCODE);
 	i2c_smbus_write_byte_data(get_i2c_client(rfdev, PIC_WR_TMS_OUT_LEN),
 					4, 0b0011);	// goto Shift-DR
 	for (i = 3; i >= 0; i--) {
