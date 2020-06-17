@@ -1,3 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Driver Header File for Routing Fabrics in AXIOM Beta Main Board
+ *
+ * Copyright (C) 2020 Swaraj Hota <swarajhota353@gmail.com>
+ */
+
 #ifndef RFDEV_H
 #define RFDEV_H
 

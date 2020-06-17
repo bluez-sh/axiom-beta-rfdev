@@ -1,3 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Driver to Program/Debug Routing Fabrics in AXIOM Beta Main Board
+ *
+ * Copyright (C) 2020 Swaraj Hota <swarajhota353@gmail.com>
+ */
+
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -6,11 +13,6 @@
 #include <linux/fpga/fpga-mgr.h>
 
 #include "rfdev.h"
-
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Swaraj Hota");
-MODULE_DESCRIPTION("Driver to program/debug routing fabrics in AXIOM Beta");
-MODULE_VERSION("0.1");
 
 #define DEV_NAME "rfdev"
 #define PIC_NUM_ADDRS 16
@@ -265,3 +267,8 @@ static void __exit rfdev_exit(void)
 
 module_init(rfdev_init);
 module_exit(rfdev_exit);
+
+MODULE_DESCRIPTION("Driver to program/debug routing fabrics in AXIOM Beta");
+MODULE_AUTHOR("Swaraj Hota <swarajhota353@gmail.com>");
+MODULE_LICENSE("GPL v2");
+MODULE_VERSION("0.1");
