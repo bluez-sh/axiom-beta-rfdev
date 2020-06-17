@@ -17,7 +17,6 @@
 #define DEV_NAME "rfdev"
 #define PIC_NUM_ADDRS 16
 
-static struct device *root_dev;
 static struct fpga_manager *fpga_mgr;
 
 struct rfdev_client {
@@ -46,9 +45,6 @@ static ssize_t idcode_show(struct device *dev,
 	client = dev_get_drvdata(dev);
 	rfdev  = i2c_get_clientdata(client);
 
-	if (!rfdev)
-		return -EFAULT;
-
 	i2c_smbus_write_byte(get_i2c_client(rfdev, PIC_WR_TMS_OUT), 0b11111111);
 	i2c_smbus_write_byte_data(get_i2c_client(rfdev, PIC_WR_TMS_OUT_LEN),
 					5, 0b00110);	// goto Shift-IR
@@ -76,6 +72,11 @@ static struct attribute *dev_attrs[] = {
 
 static struct attribute_group dev_attr_group = {
 	.attrs = dev_attrs,
+};
+
+static const struct attribute_group *rfdev_attr_groups[] = {
+	&dev_attr_group,
+	NULL,
 };
 
 static int rfdev_fpga_ops_config_init(struct fpga_manager *mgr,
@@ -111,6 +112,7 @@ static const struct fpga_manager_ops rfdev_fpga_ops = {
 	.write		= rfdev_fpga_ops_config_write,
 	.write_complete = rfdev_fpga_ops_config_complete,
 	.state		= rfdev_fpga_ops_state,
+	.groups		= rfdev_attr_groups,
 };
 
 static int rfdev_make_dummy_client(struct rfdev_device *rfdev,
@@ -197,21 +199,12 @@ static int rfdev_probe(struct i2c_client *client,
 					&rfdev_fpga_ops, NULL);
 	if (!fpga_mgr)
 		return -ENOMEM;
-
+	dev_set_drvdata(&fpga_mgr->dev, client);
 	err = fpga_mgr_register(fpga_mgr);
 	if (err) {
 		pr_err("%s: unable to register FPGA manager\n", __func__);
 		return err;
 	}
-
-	/* Create sysfs entries */
-	root_dev = root_device_register(DEV_NAME);
-	if (!root_dev)
-		return -ENOMEM;
-	dev_set_drvdata(root_dev, client);
-	err = sysfs_create_group(&root_dev->kobj, &dev_attr_group);
-	if (err)
-		pr_err("%s: sysfs_create_group failure\n", __func__);
 
 	return 0;
 }
@@ -224,10 +217,7 @@ static int rfdev_remove(struct i2c_client *client)
 
 	if (fpga_mgr)
 		fpga_mgr_unregister(fpga_mgr);
-	if (rfdev)
-		rfdev_remove_dummy_clients(rfdev);
-	if (root_dev)
-		root_device_unregister(root_dev);
+	rfdev_remove_dummy_clients(rfdev);
 
 	return 0;
 }
