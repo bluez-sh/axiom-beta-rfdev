@@ -34,39 +34,130 @@ static struct i2c_client *get_i2c_client(struct rfdev_device *rfdev,
 	return rfdev->client[pic_opr].client;
 };
 
-static ssize_t idcode_show(struct device *dev,
-			   struct device_attribute *attr, char *buf)
+static int get_idcode(struct rfdev_device *rfdev, uint32_t *idcode)
 {
-	struct i2c_client *client;
-	struct rfdev_device *rfdev;
-	uint32_t idcode = 0;
 	int i;
 
-	client = dev_get_drvdata(dev);
-	rfdev  = i2c_get_clientdata(client);
-
-	i2c_smbus_write_byte(get_i2c_client(rfdev, PIC_WR_TMS_OUT), 0b11111111);
+	i2c_smbus_write_byte(get_i2c_client(rfdev, PIC_WR_TMS_OUT), 0xff);
 	i2c_smbus_write_byte_data(get_i2c_client(rfdev, PIC_WR_TMS_OUT_LEN),
 					5, 0b00110);	// goto Shift-IR
 	i2c_smbus_write_byte(get_i2c_client(rfdev, PIC_WR_TDI_OUT), RF_IDCODE);
 	i2c_smbus_write_byte_data(get_i2c_client(rfdev, PIC_WR_TMS_OUT_LEN),
 					4, 0b0011);	// goto Shift-DR
+
+	*idcode = 0;
 	for (i = 3; i >= 0; i--) {
 		int val = i2c_smbus_read_byte(
 				get_i2c_client(rfdev, PIC_RD_TDO_IN_CONT));
 		if (val < 0)
 			return val;
-		idcode |= (val << (i * 8));
+		*idcode |= (val << (i * 8));
 	}
-	i2c_smbus_write_byte(get_i2c_client(rfdev, PIC_WR_TMS_OUT), 0b11111111);
+
+	i2c_smbus_write_byte(get_i2c_client(rfdev, PIC_WR_TMS_OUT), 0xff);
+
+	return 0;
+}
+
+static int get_status(struct rfdev_device *rfdev, uint32_t *status)
+{
+	int i;
+
+	i2c_smbus_write_byte(get_i2c_client(rfdev, PIC_WR_TMS_OUT), 0xff);
+	i2c_smbus_write_byte_data(get_i2c_client(rfdev, PIC_WR_TMS_OUT_LEN),
+					5, 0b00110);	// goto Shift-IR
+	i2c_smbus_write_byte(get_i2c_client(rfdev, PIC_WR_TDI_OUT),
+					RF_LSC_READ_STATUS);
+	i2c_smbus_write_byte_data(get_i2c_client(rfdev, PIC_WR_TMS_OUT_LEN),
+					4, 0b0011);	// goto Shift-DR
+
+	*status = 0;
+	for (i = 3; i >= 0; i--) {
+		int val = i2c_smbus_read_byte(
+				get_i2c_client(rfdev, PIC_RD_TDO_IN_CONT));
+		if (val < 0)
+			return val;
+		*status |= (val << (i * 8));
+	}
+
+	i2c_smbus_write_byte(get_i2c_client(rfdev, PIC_WR_TMS_OUT), 0xff);
+
+	return 0;
+}
+
+static int wait_not_busy(struct rfdev_device *rfdev)
+{
+	int val, loop = 0;
+
+	do {
+		i2c_smbus_write_byte(
+				get_i2c_client(rfdev, PIC_WR_TMS_OUT), 0xff);
+		i2c_smbus_write_byte_data(
+				get_i2c_client(rfdev, PIC_WR_TMS_OUT_LEN),
+				5, 0b00110);	// goto Shift-IR
+		i2c_smbus_write_byte(
+				get_i2c_client(rfdev, PIC_WR_TDI_OUT),
+				RF_LSC_CHECK_BUSY);
+		i2c_smbus_write_byte_data(
+				get_i2c_client(rfdev, PIC_WR_TMS_OUT_LEN),
+				4, 0b0011);	// goto Shift-DR
+
+		val = i2c_smbus_read_byte(
+				get_i2c_client(rfdev, PIC_RD_TDO_IN));
+		if (val < 0)
+			return val;
+		if (++loop >= 128)
+			return -EBUSY;
+
+		i2c_smbus_write_byte(
+				get_i2c_client(rfdev, PIC_WR_TMS_OUT), 0xff);
+	} while (test_bit(7, (unsigned long *) &val));
+
+	return 0;
+}
+
+static ssize_t idcode_show(struct device *dev,
+			   struct device_attribute *attr, char *buf)
+{
+	struct i2c_client *client;
+	struct rfdev_device *rfdev;
+	uint32_t idcode;
+	int err;
+
+	client = dev_get_drvdata(dev);
+	rfdev  = i2c_get_clientdata(client);
+
+	err = get_idcode(rfdev, &idcode);
+	if (err)
+		return err;
 
 	return scnprintf(buf, PAGE_SIZE, "0x%08x\n", idcode);
 }
 
+static ssize_t rf_status_show(struct device *dev,
+			      struct device_attribute *attr, char *buf)
+{
+	struct i2c_client *client;
+	struct rfdev_device *rfdev;
+	uint32_t status;
+	int err;
+
+	client = dev_get_drvdata(dev);
+	rfdev  = i2c_get_clientdata(client);
+
+	err = get_status(rfdev, &status);
+	if (err)
+		return err;
+
+	return scnprintf(buf, PAGE_SIZE, "0x%08x\n", status);
+}
+
 static DEVICE_ATTR_RO(idcode);
+static DEVICE_ATTR_RO(rf_status);
 
 static struct attribute *dev_attrs[] = {
 	&dev_attr_idcode.attr,
+	&dev_attr_rf_status.attr,
 	NULL,
 };
 
@@ -174,10 +265,8 @@ static int rfdev_probe(struct i2c_client *client,
 
 	for (i = 1; i < PIC_NUM_ADDRS; i++) {
 		err = rfdev_make_dummy_client(rfdev, i);
-		if (err) {
-			rfdev_remove_dummy_clients(rfdev);
-			return err;
-		}
+		if (err)
+			goto dummy_clean_out;
 	}
 
 	i2c_set_clientdata(client, rfdev);
@@ -185,8 +274,10 @@ static int rfdev_probe(struct i2c_client *client,
 	/* Test read/write from/to the PIC */
 	i2c_smbus_write_byte(get_i2c_client(rfdev, PIC_WR_BUF_DATA), 0xaa);
 	val = i2c_smbus_read_byte(get_i2c_client(rfdev, PIC_RD_BUF_DATA));
-	if (val < 0)
-		return val;
+	if (val < 0) {
+		err = val;
+		goto dummy_clean_out;
+	}
 
 	if ((val & 0xff) == 0xaa)
 		pr_debug("%s: read/write test passed\n", __func__);
@@ -197,16 +288,29 @@ static int rfdev_probe(struct i2c_client *client,
 	/* Create and register fpga manager */
 	fpga_mgr = devm_fpga_mgr_create(dev, "RFDev MachXO2 FPGA Manager",
 					&rfdev_fpga_ops, NULL);
-	if (!fpga_mgr)
-		return -ENOMEM;
+	if (!fpga_mgr) {
+		err = -ENOMEM;
+		goto dummy_clean_out;
+	}
 	dev_set_drvdata(&fpga_mgr->dev, client);
 	err = fpga_mgr_register(fpga_mgr);
 	if (err) {
 		pr_err("%s: unable to register FPGA manager\n", __func__);
-		return err;
+		goto dummy_clean_out;
+	}
+
+	err = wait_not_busy(rfdev);
+	if (err) {
+		i2c_smbus_write_byte(
+				get_i2c_client(rfdev, PIC_WR_TMS_OUT), 0xff);
+		goto dummy_clean_out;
 	}
 
 	return 0;
+
+dummy_clean_out:
+	rfdev_remove_dummy_clients(rfdev);
+	return err;
 }
 
 static int rfdev_remove(struct i2c_client *client)
