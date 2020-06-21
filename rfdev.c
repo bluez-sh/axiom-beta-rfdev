@@ -80,6 +80,7 @@ static int get_status(struct rfdev_device *rfdev, uint32_t *status)
 		*status |= (val << (i * 8));
 	}
 
+	pr_debug("%s: received 0x%08x\n", __func__, *status);
 	i2c_smbus_write_byte(get_i2c_client(rfdev, PIC_WR_TMS_OUT), 0xff);
 
 	return 0;
@@ -108,6 +109,8 @@ static int wait_not_busy(struct rfdev_device *rfdev)
 			return val;
 		if (++loop >= 128)
 			return -EBUSY;
+
+		pr_debug("%s: received 0x%02x\n", __func__, val & 0xff);
 
 		i2c_smbus_write_byte(
 				get_i2c_client(rfdev, PIC_WR_TMS_OUT), 0xff);
@@ -174,21 +177,96 @@ static int rfdev_fpga_ops_config_init(struct fpga_manager *mgr,
 				      struct fpga_image_info *info,
 				      const char *buf, size_t count)
 {
+	struct i2c_client *client;
+	struct rfdev_device *rfdev;
+	uint32_t status;
+	int err;
+
 	pr_debug("%s: called\n", __func__);
+
+	client = dev_get_drvdata(&mgr->dev);
+	rfdev  = i2c_get_clientdata(client);
+
+	i2c_smbus_write_byte(get_i2c_client(rfdev, PIC_WR_TMS_OUT), 0xff);
+	i2c_smbus_write_byte_data(get_i2c_client(rfdev, PIC_WR_TMS_OUT_LEN),
+					5, 0b00110);	// goto Shift-IR
+	i2c_smbus_write_byte_data(get_i2c_client(rfdev, PIC_WR_TDI_OUT),
+					RF_ISC_ENABLE, 0x00);
+
+	get_status(rfdev, &status);
+
+	i2c_smbus_write_byte_data(get_i2c_client(rfdev, PIC_WR_TMS_OUT_LEN),
+					5, 0b00110);	// goto Shift-IR
+	i2c_smbus_write_byte_data(get_i2c_client(rfdev, PIC_WR_TDI_OUT),
+					RF_ISC_ERASE, 0x01);
+
+	err = wait_not_busy(rfdev);
+	if (err) {
+		i2c_smbus_write_byte(
+				get_i2c_client(rfdev, PIC_WR_TMS_OUT), 0xff);
+		return err;
+	}
+	get_status(rfdev, &status);
+
+	i2c_smbus_write_byte_data(get_i2c_client(rfdev, PIC_WR_TMS_OUT_LEN),
+					5, 0b00110);	// goto Shift-IR
+	i2c_smbus_write_byte(get_i2c_client(rfdev, PIC_WR_TDI_OUT),
+					RF_LSC_BITSTREAM_BURST);
+
+	get_status(rfdev, &status);
+
+	i2c_smbus_write_byte_data(get_i2c_client(rfdev, PIC_WR_TMS_OUT_LEN),
+					4, 0b0010);	// goto Shift-DR
 	return 0;
 }
 
 static int rfdev_fpga_ops_config_write(struct fpga_manager *mgr,
 				       const char *buf, size_t count)
 {
-	pr_debug("%s: called\n", __func__);
+	struct i2c_client *client;
+	struct rfdev_device *rfdev;
+	int err;
+
+	client = dev_get_drvdata(&mgr->dev);
+	rfdev  = i2c_get_clientdata(client);
+
+	if (count == 1)
+		err = i2c_smbus_write_byte(
+				get_i2c_client(rfdev, PIC_WR_TDI_OUT_CONT),
+				buf[0]);
+	else
+		err = i2c_smbus_write_i2c_block_data(
+				get_i2c_client(rfdev, PIC_WR_TDI_OUT_CONT),
+				buf[0], count - 1, &buf[1]);
+	if (err)
+		return err;
+
 	return 0;
 }
 
 static int rfdev_fpga_ops_config_complete(struct fpga_manager *mgr,
 					  struct fpga_image_info *info)
 {
+	struct i2c_client *client;
+	struct rfdev_device *rfdev;
+	uint32_t status;
+
 	pr_debug("%s: called\n", __func__);
+
+	client = dev_get_drvdata(&mgr->dev);
+	rfdev  = i2c_get_clientdata(client);
+
+	get_status(rfdev, &status);
+
+	i2c_smbus_write_byte_data(get_i2c_client(rfdev, PIC_WR_TMS_OUT_LEN),
+					5, 0b00110);	// goto Shift-IR
+	i2c_smbus_write_byte(get_i2c_client(rfdev, PIC_WR_TDI_OUT),
+					RF_ISC_DISABLE);
+
+	get_status(rfdev, &status);
+
+	i2c_smbus_write_byte(get_i2c_client(rfdev, PIC_WR_TMS_OUT), 0xff);
+
 	return 0;
 }
 
@@ -199,11 +277,12 @@ static enum fpga_mgr_states rfdev_fpga_ops_state(struct fpga_manager *mgr)
 }
 
 static const struct fpga_manager_ops rfdev_fpga_ops = {
-	.write_init	= rfdev_fpga_ops_config_init,
-	.write		= rfdev_fpga_ops_config_write,
-	.write_complete = rfdev_fpga_ops_config_complete,
-	.state		= rfdev_fpga_ops_state,
-	.groups		= rfdev_attr_groups,
+	.initial_header_size	= 33,
+	.write_init		= rfdev_fpga_ops_config_init,
+	.write			= rfdev_fpga_ops_config_write,
+	.write_complete		= rfdev_fpga_ops_config_complete,
+	.state			= rfdev_fpga_ops_state,
+	.groups			= rfdev_attr_groups,
 };
 
 static int rfdev_make_dummy_client(struct rfdev_device *rfdev,
