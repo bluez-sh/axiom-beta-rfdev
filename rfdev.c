@@ -201,13 +201,19 @@ static int rfdev_fpga_ops_config_init(struct fpga_manager *mgr,
 	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, 0x00, 0);
 	pr_debug("%s: sent command 0x%02x", __func__, RF_ISC_ENABLE);
 
-	get_status(rfdev, &status);
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0xff, 0);
 
 	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b00110, 5); // goto Shift-IR
 	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, RF_ISC_ERASE, 0);
 	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-DR
-	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, 0x01, 0);
+	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, 0x80, 0);
 	pr_debug("%s: sent command 0x%02x", __func__, RF_ISC_ERASE);
+
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0xff, 0);
+
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b00110, 5); // goto Shift-IR
+	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, RF_BYPASS, 0);
+	pr_debug("%s: sent command 0x%02x", __func__, RF_BYPASS);
 
 	err = wait_not_busy(rfdev);
 	if (err) {
