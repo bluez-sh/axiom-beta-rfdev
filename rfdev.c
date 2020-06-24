@@ -199,6 +199,7 @@ static int rfdev_fpga_ops_config_init(struct fpga_manager *mgr,
 	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, RF_ISC_ENABLE, 0);
 	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-DR
 	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, 0x00, 0);
+	pr_debug("%s: sent command 0x%02x", __func__, RF_ISC_ENABLE);
 
 	get_status(rfdev, &status);
 
@@ -206,6 +207,7 @@ static int rfdev_fpga_ops_config_init(struct fpga_manager *mgr,
 	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, RF_ISC_ERASE, 0);
 	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-DR
 	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, 0x01, 0);
+	pr_debug("%s: sent command 0x%02x", __func__, RF_ISC_ERASE);
 
 	err = wait_not_busy(rfdev);
 	if (err) {
@@ -216,6 +218,7 @@ static int rfdev_fpga_ops_config_init(struct fpga_manager *mgr,
 
 	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b00110, 5); // goto Shift-IR
 	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, RF_LSC_BITSTREAM_BURST, 0);
+	pr_debug("%s: sent command 0x%02x", __func__, RF_LSC_BITSTREAM_BURST);
 
 	get_status(rfdev, &status);
 
@@ -243,6 +246,7 @@ static int rfdev_fpga_ops_config_write(struct fpga_manager *mgr,
 	if (err)
 		return err;
 
+	pr_debug("%s: %d bytes written", __func__, count);
 	return 0;
 }
 
@@ -323,7 +327,7 @@ static int rfdev_probe(struct i2c_client *client,
 	unsigned int i;
 	int err, val;
 
-	pr_debug("%s: probe called\n", DEV_NAME);
+	pr_debug("%s: called\n", __func__);
 
 	if (!i2c_check_functionality(client->adapter,
 		I2C_FUNC_SMBUS_BYTE | I2C_FUNC_SMBUS_BYTE_DATA |
@@ -375,12 +379,6 @@ static int rfdev_probe(struct i2c_client *client,
 	err = fpga_mgr_register(fpga_mgr);
 	if (err) {
 		pr_err("%s: unable to register FPGA manager\n", __func__);
-		goto dummy_clean_out;
-	}
-
-	err = wait_not_busy(rfdev);
-	if (err) {
-		i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0xff, 0);
 		goto dummy_clean_out;
 	}
 
