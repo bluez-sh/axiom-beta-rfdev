@@ -194,15 +194,18 @@ static int rfdev_fpga_ops_config_init(struct fpga_manager *mgr,
 	rfdev  = i2c_get_clientdata(client);
 
 	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0xff, 0);
+
 	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b00110, 5); // goto Shift-IR
-	i2c_smbus_write_byte_data(get_i2c_client(rfdev, PIC_WR_TDI_OUT),
-					RF_ISC_ENABLE, 0x00);
+	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, RF_ISC_ENABLE, 0);
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-DR
+	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, 0x00, 0);
 
 	get_status(rfdev, &status);
 
 	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b00110, 5); // goto Shift-IR
-	i2c_smbus_write_byte_data(get_i2c_client(rfdev, PIC_WR_TDI_OUT),
-					RF_ISC_ERASE, 0x01);
+	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, RF_ISC_ERASE, 0);
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-DR
+	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, 0x01, 0);
 
 	err = wait_not_busy(rfdev);
 	if (err) {
