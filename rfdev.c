@@ -232,21 +232,27 @@ static int rfdev_fpga_ops_config_write(struct fpga_manager *mgr,
 {
 	struct i2c_client *client;
 	struct rfdev_device *rfdev;
+	unsigned int c, i;
 	int err;
 
 	client = dev_get_drvdata(&mgr->dev);
 	rfdev  = i2c_get_clientdata(client);
 
-	if (count == 1)
-		err = i2c_pic_write(rfdev, PIC_WR_TDI_OUT_CONT, buf[0], 0);
-	else
-		err = i2c_smbus_write_i2c_block_data(
-				get_i2c_client(rfdev, PIC_WR_TDI_OUT_CONT),
-				buf[0], count - 1, &buf[1]);
-	if (err)
-		return err;
+	for (i = 0; count > 0; count -= c, i += c) {
 
-	pr_debug("%s: %d bytes written", __func__, count);
+		c = min(33, count);
+
+		if (c == 1)
+			err = i2c_pic_write(rfdev, PIC_WR_TDI_OUT_CONT,
+					buf[i], 0);
+		else
+			err = i2c_smbus_write_i2c_block_data(
+				get_i2c_client(rfdev, PIC_WR_TDI_OUT_CONT),
+				buf[i], c - 1, &buf[i + 1]);
+		if (err)
+			return err;
+	}
+
 	return 0;
 }
 
@@ -281,7 +287,6 @@ static enum fpga_mgr_states rfdev_fpga_ops_state(struct fpga_manager *mgr)
 }
 
 static const struct fpga_manager_ops rfdev_fpga_ops = {
-	.initial_header_size	= 33,
 	.write_init		= rfdev_fpga_ops_config_init,
 	.write			= rfdev_fpga_ops_config_write,
 	.write_complete		= rfdev_fpga_ops_config_complete,
