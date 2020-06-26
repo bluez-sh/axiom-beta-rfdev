@@ -56,10 +56,9 @@ static int get_idcode(struct rfdev_device *rfdev, uint32_t *idcode)
 {
 	int i;
 
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0xff, 0);
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b00110, 5); // goto Shift-IR
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4); // goto Shift-IR
 	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, RF_IDCODE, 0);
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-DR
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4); // goto Shift-DR
 
 	*idcode = 0;
 	for (i = 3; i >= 0; i--) {
@@ -70,7 +69,7 @@ static int get_idcode(struct rfdev_device *rfdev, uint32_t *idcode)
 		*idcode |= (val << (i * 8));
 	}
 
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0xff, 0);
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b011, 3); // goto Run-Test
 
 	return 0;
 }
@@ -79,8 +78,7 @@ static int get_status(struct rfdev_device *rfdev, uint32_t *status)
 {
 	int i;
 
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0xff, 0);
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b00110, 5); // goto Shift-IR
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-IR
 	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, RF_LSC_READ_STATUS, 0);
 	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-DR
 
@@ -94,7 +92,7 @@ static int get_status(struct rfdev_device *rfdev, uint32_t *status)
 	}
 
 	pr_debug("%s: received 0x%08x\n", __func__, *status);
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0xff, 0);
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b011, 3); // goto Run-Test
 
 	return 0;
 }
@@ -104,9 +102,8 @@ static int wait_not_busy(struct rfdev_device *rfdev)
 	int val, loop = 0;
 
 	do {
-		i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0xff, 0);
 		i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN,
-				0b00110, 5);	// goto Shift-IR
+				0b0011, 4);	// goto Shift-IR
 		i2c_pic_write(rfdev, PIC_WR_TDI_OUT, RF_LSC_CHECK_BUSY, 0);
 		i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN,
 				0b0011, 4);	// goto Shift-DR
@@ -119,7 +116,7 @@ static int wait_not_busy(struct rfdev_device *rfdev)
 
 		pr_debug("%s: received 0x%02x\n", __func__, val & 0xff);
 
-		i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0xff, 0);
+		i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0b01, 2); // goto Run-Test
 	} while (test_bit(7, (unsigned long *) &val));
 
 	return 0;
@@ -136,6 +133,7 @@ static ssize_t idcode_show(struct device *dev,
 	client = dev_get_drvdata(dev);
 	rfdev  = i2c_get_clientdata(client);
 
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0x7f, 0);	// goto Run-Test
 	err = get_idcode(rfdev, &idcode);
 	if (err)
 		return err;
@@ -154,6 +152,7 @@ static ssize_t rf_status_show(struct device *dev,
 	client = dev_get_drvdata(dev);
 	rfdev  = i2c_get_clientdata(client);
 
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0x7f, 0);	// goto Run-Test
 	err = get_status(rfdev, &status);
 	if (err)
 		return err;
@@ -193,27 +192,29 @@ static int rfdev_fpga_ops_config_init(struct fpga_manager *mgr,
 	client = dev_get_drvdata(&mgr->dev);
 	rfdev  = i2c_get_clientdata(client);
 
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0xff, 0);
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0x7f, 0);	     // goto Run-Test
 
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b00110, 5); // goto Shift-IR
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4); // goto Shift-IR
 	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, RF_ISC_ENABLE, 0);
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-DR
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4); // goto Shift-DR
 	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, 0x00, 0);
 	pr_debug("%s: sent command 0x%02x", __func__, RF_ISC_ENABLE);
 
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0xff, 0);
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b01, 2);    // goto Run-Test
 
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b00110, 5); // goto Shift-IR
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-IR
 	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, RF_ISC_ERASE, 0);
 	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-DR
-	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, 0x80, 0);
+	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, 0x01, 0);
 	pr_debug("%s: sent command 0x%02x", __func__, RF_ISC_ERASE);
 
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0xff, 0);
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b01, 2);    // goto Run-Test
 
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b00110, 5); // goto Shift-IR
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-IR
 	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, RF_BYPASS, 0);
 	pr_debug("%s: sent command 0x%02x", __func__, RF_BYPASS);
+
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b01, 2);    // goto Run-Test
 
 	err = wait_not_busy(rfdev);
 	if (err) {
@@ -222,13 +223,11 @@ static int rfdev_fpga_ops_config_init(struct fpga_manager *mgr,
 	}
 	get_status(rfdev, &status);
 
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b00110, 5); // goto Shift-IR
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-IR
 	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, RF_LSC_BITSTREAM_BURST, 0);
 	pr_debug("%s: sent command 0x%02x", __func__, RF_LSC_BITSTREAM_BURST);
 
-	get_status(rfdev, &status);
-
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0010, 4);  // goto Shift-DR
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-DR
 
 	return 0;
 }
@@ -274,14 +273,19 @@ static int rfdev_fpga_ops_config_complete(struct fpga_manager *mgr,
 	client = dev_get_drvdata(&mgr->dev);
 	rfdev  = i2c_get_clientdata(client);
 
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b011, 3);   // goto Run-Test
+
 	get_status(rfdev, &status);
 
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b00110, 5); // goto Shift-IR
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-IR
 	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, RF_ISC_DISABLE, 0);
+	pr_debug("%s: sent command 0x%02x", __func__, RF_ISC_DISABLE);
+
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b01, 2);    // goto Run-Test
 
 	get_status(rfdev, &status);
 
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0xff, 0);
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0xff, 0);	      // goto Reset
 
 	return 0;
 }
