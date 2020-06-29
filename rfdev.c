@@ -46,19 +46,53 @@ static struct i2c_client *get_i2c_client(struct rfdev_device *rfdev,
 static int i2c_pic_read(struct rfdev_device *rfdev,
 			enum i2c_client_read_opr opr)
 {
-	return i2c_smbus_read_byte(get_i2c_client(rfdev, opr));
+	int ret;
+
+	ret = i2c_smbus_read_byte(get_i2c_client(rfdev, opr));
+	pr_debug("smbus_read %02X -> %02X\n",
+			get_i2c_client(rfdev, opr)->addr, ret);
+	return ret;
 }
 
 static int i2c_pic_write(struct rfdev_device *rfdev,
 			 enum i2c_client_write_opr opr,
-			 unsigned char data,
-			 unsigned char num_bits)
+			 uint8_t data,
+			 uint8_t num_bits)
 {
-	if (!num_bits)
-		return i2c_smbus_write_byte(get_i2c_client(rfdev, opr), data);
-	else
-		return i2c_smbus_write_byte_data(get_i2c_client(rfdev, opr),
-					num_bits, data);
+	int ret;
+
+	if (!num_bits) {
+		pr_debug("smbus_write %02X <- %02X\n",
+				get_i2c_client(rfdev, opr)->addr, data);
+		ret = i2c_smbus_write_byte(get_i2c_client(rfdev, opr), data);
+	} else {
+		pr_debug("smbus_write %02X <- %02X %02X\n",
+				get_i2c_client(rfdev, opr)->addr,
+				num_bits, data);
+		ret = i2c_smbus_write_byte_data(
+				get_i2c_client(rfdev, opr), num_bits, data);
+	}
+	return ret;
+}
+
+static int i2c_pic_write_block(struct rfdev_device *rfdev,
+			       enum i2c_client_write_opr opr,
+			       uint8_t cmd, uint8_t len,
+			       const uint8_t *data)
+{
+	char data_str[RF_MAX_TX_SIZE * 3 + 2];
+	unsigned int i, ptr = 0;
+
+	for (i = 0; i < len; i++)
+		ptr += scnprintf(data_str + ptr,
+				sizeof(data_str) - ptr, "%02X ", data[i]);
+	if (ptr > 0)
+		data_str[ptr - 1] = '\0';
+
+	pr_debug("smbus_write %02X <- %02X %s\n",
+			get_i2c_client(rfdev, opr)->addr, cmd, data_str);
+	return i2c_smbus_write_i2c_block_data(
+			get_i2c_client(rfdev, opr), cmd, len, data);
 }
 
 static int get_idcode(struct rfdev_device *rfdev, uint32_t *idcode)
@@ -226,9 +260,6 @@ static int rfdev_fpga_ops_config_init(struct fpga_manager *mgr,
 
 	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0b01, 0);	      // goto Run-Test
 
-	/*err = wait_not_busy(rfdev);*/
-	/*if (err)*/
-		/*goto err;*/
 	get_status(rfdev, &status);
 
 	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-IR
@@ -274,9 +305,8 @@ static int rfdev_fpga_ops_config_write(struct fpga_manager *mgr,
 			err = i2c_pic_write(rfdev, PIC_WR_TDI_OUT_CONT,
 					rbuf[0], 0);
 		else
-			err = i2c_smbus_write_i2c_block_data(
-				get_i2c_client(rfdev, PIC_WR_TDI_OUT_CONT),
-				rbuf[0], c - 1, &rbuf[1]);
+			err = i2c_pic_write_block(rfdev, PIC_WR_TDI_OUT_CONT,
+					rbuf[0], c - 1, &rbuf[1]);
 		if (err)
 			return err;
 	}
