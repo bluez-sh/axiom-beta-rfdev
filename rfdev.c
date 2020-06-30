@@ -432,11 +432,12 @@ static int rfdev_probe(struct i2c_client *client,
 		goto dummy_clean_out;
 	}
 
-	if ((val & 0xff) == 0xaa)
-		pr_debug("%s: read/write test passed\n", __func__);
-	else
-		pr_debug("%s: read/write test failed, received byte 0x%02x\n",
+	if ((val & 0xff) != 0xaa) {
+		pr_err("%s: read/write test failed, received byte 0x%02x\n",
 				__func__, val);
+		err = -EIO;
+		goto dummy_clean_out;
+	}
 
 	/* Create and register fpga manager */
 	fpga_mgr = devm_fpga_mgr_create(dev, "RFDev MachXO2 FPGA Manager",
