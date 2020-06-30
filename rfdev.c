@@ -160,7 +160,7 @@ static int wait_not_busy(struct rfdev_device *rfdev)
 		pr_debug("%s: received 0x%02x\n", __func__, val & 0xff);
 
 		i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN,
-				0b01, 2); // goto Run-Test
+				0b01, 2);	// goto Run-Test
 	} while (test_bit(7, (unsigned long *) &val));
 
 	return 0;
@@ -245,6 +245,9 @@ static int rfdev_fpga_ops_config_init(struct fpga_manager *mgr,
 	pr_debug("%s: sent command 0x%02x", __func__, RF_ISC_ENABLE);
 
 	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0b01, 0);	      // goto Run-Test
+	err = wait_not_busy(rfdev);
+	if (err)
+		goto err;
 
 	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-IR
 	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, RF_ISC_ERASE, 0);
@@ -253,22 +256,10 @@ static int rfdev_fpga_ops_config_init(struct fpga_manager *mgr,
 	pr_debug("%s: sent command 0x%02x", __func__, RF_ISC_ERASE);
 
 	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0b01, 0);	      // goto Run-Test
-
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-IR
-	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, RF_BYPASS, 0);
-	pr_debug("%s: sent command 0x%02x", __func__, RF_BYPASS);
-
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0b01, 0);	      // goto Run-Test
-
+	err = wait_not_busy(rfdev);
+	if (err)
+		goto err;
 	get_status(rfdev, &status);
-
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-IR
-	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, RF_LSC_INIT_ADDRESS, 0);
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-DR
-	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, 0x01, 0);
-	pr_debug("%s: sent command 0x%02x", __func__, RF_LSC_INIT_ADDRESS);
-
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0b01, 0);	      // goto Run-Test
 
 	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-IR
 	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, RF_LSC_BITSTREAM_BURST, 0);
