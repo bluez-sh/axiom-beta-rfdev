@@ -17,6 +17,7 @@
 #define DEV_NAME "rfdev"
 #define PIC_NUM_ADDRS	16
 #define RF_MAX_TX_SIZE	33
+#define RF_MAX_BSY_LOOP	128
 
 static struct fpga_manager *fpga_mgr;
 
@@ -135,7 +136,7 @@ static int get_status(struct rfdev_device *rfdev, uint32_t *status)
 	}
 
 	pr_debug("%s: received 0x%08x\n", __func__, *status);
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b011, 3); // goto Run-Test
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b011, 3);   // goto Run-Test
 
 	return 0;
 }
@@ -154,7 +155,7 @@ static int wait_not_busy(struct rfdev_device *rfdev)
 		val = i2c_pic_read(rfdev, PIC_RD_TDO_IN);
 		if (val < 0)
 			return val;
-		if (++loop >= 128)
+		if (++loop >= RF_MAX_BSY_LOOP)
 			return -EBUSY;
 
 		pr_debug("%s: received 0x%02x\n", __func__, val & 0xff);
@@ -512,4 +513,4 @@ module_exit(rfdev_exit);
 MODULE_DESCRIPTION("Driver to program/debug routing fabrics in AXIOM Beta");
 MODULE_AUTHOR("Swaraj Hota <swarajhota353@gmail.com>");
 MODULE_LICENSE("GPL v2");
-MODULE_VERSION("0.1");
+MODULE_VERSION("1.0");
