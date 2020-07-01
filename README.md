@@ -1,6 +1,9 @@
 # axiom-beta-rfdev
 A Linux Kernel Driver for programming/debugging the Lattice MachXO2 FPGAs (used as routing fabrics) in AXIOM Beta Main Board.
-The driver integrates with Linux FPGA Manager Framework to allow easy programming of MachXO2's SRAM.
+The driver integrates with Linux FPGA Manager Framework to allow easy programming of MachXO2's SRAM.<br><br>
+Here is an overview of the setup:<br>
+Zynq SoC <--- *I2C* ---> PIC16 MCU <--- *JTAG* ---> MachXO2 FPGA<br><br>
+Linux runs on hardened ARM cores in Zynq SoC, which is where the driver comes in. PIC16 responds to a range of I2C commands and translates them into JTAG commands for MachXO2. 
 
 ## Currently supported features
 - Upload a compressed bitstream (produced by Lattice Diamod tools) into MachXO2's SRAM<br>

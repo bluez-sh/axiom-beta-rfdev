@@ -113,7 +113,7 @@ static int get_idcode(struct rfdev_device *rfdev, uint32_t *idcode)
 		*idcode |= (val << (i * 8));
 	}
 
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b011, 3); // goto Run-Test
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b011, 3);  // goto Run-Test
 
 	return 0;
 }
