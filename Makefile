@@ -4,7 +4,7 @@ CFLAGS_rfdev.o := -Wall -Wextra -DDEBUG
 
 CROSS = arm-linux-gnueabi-
 ARCH  = arm
-KERN_PATH = /root/axiom-firmware/build/linux-v5.2.14.git/
+KERN_PATH = $(shell find /root/axiom-firmware/build/ -name "linux-v*.git")/
 
 all: 	cross
 
