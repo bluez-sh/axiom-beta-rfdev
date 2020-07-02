@@ -22,3 +22,15 @@ pic@40 {
     compatible = "apertus,pic-rf-interface";
 };
 ```
+### Build Instructions
+1. <code>git clone --recursive https://github.com/apertus-open-source-cinema/axiom-firmware</code>
+2. <code>cd axiom-firmware</code>
+3. <code>./makefiles/docker-make.sh build/linux-v5.2.14.git/arch/arm/boot/zImage</code>, where <code>5.2.14</code> should be replaced with latest kernel version used in AXIOM Beta (see here: <code>axiom-firmware/boot/kernel.config</code>). This command should build the kernel once.
+4. <code>cd build</code>
+5. <code>git clone https://github.com/Swaraj1998/axiom-beta-rfdev</code> (this repo)
+6. <code>../makefiles/docker-make.sh build-shell</code> (get a shell inside the build container)
+<br><br>Inside the build-shell:
+7. <code>cd build/axiom-beta-rfdev</code> (you just cloned it)
+8. <code>make</code> (or <code>make clean</code>)
+
+Note: <code>make native</code> & <code>make clean_native</code> compiles against currently running kernel in your system (just used for testing build)
