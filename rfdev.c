@@ -19,7 +19,7 @@
 #define PIC_NUM_ADDRS		16
 #define RF_MAX_TX_SIZE		33
 #define RF_MAX_BSY_LOOP		128
-#define DIGEST_SIZE		20
+#define DIGEST_SIZE		16
 
 static struct fpga_manager *fpga_mgr;
 
@@ -248,11 +248,18 @@ static ssize_t digest_show(struct device *dev,
 {
 	struct i2c_client *client;
 	struct rfdev_device *rfdev;
+	unsigned int i, ptr = 0;
 
 	client = dev_get_drvdata(dev);
 	rfdev  = i2c_get_clientdata(client);
 
-	return scnprintf(buf, PAGE_SIZE, "%s\n", rfdev->digest);
+	for (i = 0; i < DIGEST_SIZE; i++)
+		ptr += scnprintf(buf + ptr,
+				PAGE_SIZE - ptr, "%02x", rfdev->digest[i]);
+	buf[ptr]     = '\n';
+	buf[ptr + 1] = '\0';
+
+	return ptr + 1;
 }
 
 static DEVICE_ATTR_RO(idcode);
