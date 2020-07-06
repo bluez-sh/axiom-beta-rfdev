@@ -11,13 +11,15 @@
 #include <linux/i2c.h>
 #include <linux/slab.h>
 #include <linux/fpga/fpga-mgr.h>
+#include <crypto/internal/hash.h>
 
 #include "rfdev.h"
 
 #define DEV_NAME "rfdev"
-#define PIC_NUM_ADDRS	16
-#define RF_MAX_TX_SIZE	33
-#define RF_MAX_BSY_LOOP	128
+#define PIC_NUM_ADDRS		16
+#define RF_MAX_TX_SIZE		33
+#define RF_MAX_BSY_LOOP		128
+#define DIGEST_SIZE		20
 
 static struct fpga_manager *fpga_mgr;
 
@@ -26,9 +28,45 @@ struct rfdev_client {
 };
 
 struct rfdev_device {
+	unsigned char digest[DIGEST_SIZE];
 	unsigned short int num_clients;
 	struct rfdev_client client[];
 };
+
+struct sdesc {
+	struct shash_desc shash;
+	char ctx[];
+};
+
+static int calc_hash(const unsigned char *data, size_t len,
+		     unsigned char *digest)
+{
+	struct crypto_shash *alg;
+	struct sdesc *sdesc;
+	int size, ret;
+
+	alg = crypto_alloc_shash("md5", CRYPTO_ALG_TYPE_SHASH, 0);
+	if (IS_ERR(alg)) {
+		pr_info("can't allocate hash algorithm\n");
+		return PTR_ERR(alg);
+	}
+
+	size = sizeof(struct shash_desc) + crypto_shash_descsize(alg);
+	sdesc = kmalloc(size, GFP_KERNEL);
+	if (!sdesc) {
+		pr_info("can't allocate sdesc\n");
+		return -ENOMEM;
+	}
+	sdesc->shash.tfm = alg;
+
+	ret = crypto_shash_digest(&sdesc->shash, data, len, digest);
+	if (ret < 0)
+		pr_info("can't calculate digest\n");
+
+	kfree(sdesc);
+	crypto_free_shash(alg);
+	return ret;
+}
 
 static unsigned char rev_byte(unsigned char b)
 {
@@ -205,12 +243,26 @@ static ssize_t rf_status_show(struct device *dev,
 	return scnprintf(buf, PAGE_SIZE, "0x%08x\n", status);
 }
 
+static ssize_t digest_show(struct device *dev,
+			   struct device_attribute *attr, char *buf)
+{
+	struct i2c_client *client;
+	struct rfdev_device *rfdev;
+
+	client = dev_get_drvdata(dev);
+	rfdev  = i2c_get_clientdata(client);
+
+	return scnprintf(buf, PAGE_SIZE, "%s\n", rfdev->digest);
+}
+
 static DEVICE_ATTR_RO(idcode);
 static DEVICE_ATTR_RO(rf_status);
+static DEVICE_ATTR_RO(digest);
 
 static struct attribute *dev_attrs[] = {
 	&dev_attr_idcode.attr,
 	&dev_attr_rf_status.attr,
+	&dev_attr_digest.attr,
 	NULL,
 };
 
@@ -286,6 +338,8 @@ static int rfdev_fpga_ops_config_write(struct fpga_manager *mgr,
 
 	client = dev_get_drvdata(&mgr->dev);
 	rfdev  = i2c_get_clientdata(client);
+
+	calc_hash(buf, count, rfdev->digest);
 
 	for (i = 0; count > 0; count -= c, i += c) {
 		c = min(RF_MAX_TX_SIZE, count);
