@@ -1,6 +1,6 @@
 obj-m+=rfdev.o
 
-CFLAGS_rfdev.o := -Wall -Wextra -DDEBUG
+CFLAGS_rfdev.o := -Wall -Wextra -DDEBUG -g -ggdb
 
 CROSS = arm-linux-gnueabi-
 ARCH  = arm
