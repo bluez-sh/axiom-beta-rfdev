@@ -15,7 +15,7 @@ Linux runs on hardened ARM cores in Zynq SoC, which is where the driver comes in
 - sysfs entry to read out status register <br>
 <code>$ cat /sys/class/fpga_manager/<i>fpga#</i>/rf_status</code>
 - sysfs entry to show md5 digest of the uploaded bitstream<br>
-<code>$ cat /sys/class/fpga_maanger/<i>fpga#</i>/digest</code>
+<code>$ cat /sys/class/fpga_manager/<i>fpga#</i>/digest</code>
 
 ## Requires
 A devicetree entry must be added to system i2c bus (2) in AXIOM Beta:
