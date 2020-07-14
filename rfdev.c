@@ -156,7 +156,7 @@ static int get_idcode(struct rfdev_device *rfdev, uint32_t *idcode)
 	return 0;
 }
 
-static int get_status(struct rfdev_device *rfdev, uint32_t *status)
+static int get_status(struct rfdev_device *rfdev, unsigned long *status)
 {
 	int i;
 
@@ -181,7 +181,8 @@ static int get_status(struct rfdev_device *rfdev, uint32_t *status)
 
 static int wait_not_busy(struct rfdev_device *rfdev)
 {
-	int val, loop = 0;
+	long val;
+	int loop = 0;
 
 	do {
 		i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN,
@@ -229,7 +230,7 @@ static ssize_t rf_status_show(struct device *dev,
 {
 	struct i2c_client *client;
 	struct rfdev_device *rfdev;
-	uint32_t status;
+	unsigned long status;
 	int err;
 
 	client = dev_get_drvdata(dev);
@@ -288,7 +289,7 @@ static int rfdev_fpga_ops_config_init(struct fpga_manager *mgr,
 {
 	struct i2c_client *client;
 	struct rfdev_device *rfdev;
-	uint32_t status;
+	unsigned long status;
 	int err;
 
 	pr_debug("%s: called\n", __func__);
@@ -372,7 +373,7 @@ static int rfdev_fpga_ops_config_complete(struct fpga_manager *mgr,
 {
 	struct i2c_client *client;
 	struct rfdev_device *rfdev;
-	uint32_t status;
+	unsigned long status;
 	int i;
 
 	pr_debug("%s: called\n", __func__);
