@@ -15,11 +15,30 @@
 
 #include "rfdev.h"
 
-#define DEV_NAME "rfdev"
+#define DEV_NAME		"rfdev"
+#define DIGEST_NAME		"md5"
+#define DIGEST_SIZE		16
 #define PIC_NUM_ADDRS		16
 #define RF_MAX_TX_SIZE		33
 #define RF_MAX_BSY_LOOP		128
-#define DIGEST_SIZE		16
+
+/* Status register bits, errors and error mask */
+#define BUSY	(31 - 12)
+#define DONE	(31 - 8)
+#define DVER	(31 - 27)
+#define ENAB	(31 - 9)
+#define FAIL	(31 - 13)
+#define ERRBITS	(31 - 25)
+#define ERRMASK	7
+
+#define ENOERR	0 /* no error */
+#define EID	1
+#define ECMD	2
+#define ECRC	3
+#define EPREAM	4 /* preamble error */
+#define EABRT	5 /* abort error */
+#define EOVERFL	6 /* overflow error */
+#define ESDMEOF	7 /* SDM EOF */
 
 static struct fpga_manager *fpga_mgr;
 
@@ -38,6 +57,48 @@ struct sdesc {
 	char ctx[];
 };
 
+static inline uint8_t get_err(unsigned long *status)
+{
+	return (*status >> ERRBITS) & ERRMASK;
+}
+
+static const char *get_err_string(uint8_t err)
+{
+	switch (err) {
+	case ENOERR:	return "No Error";
+	case EID:	return "ID ERR";
+	case ECMD:	return "CMD ERR";
+	case ECRC:	return "CRC ERR";
+	case EPREAM:	return "Preamble ERR";
+	case EABRT:	return "Abort ERR";
+	case EOVERFL:	return "Overflow ERR";
+	case ESDMEOF:	return "SDM EOF";
+	}
+
+	return "Default switch case";
+}
+
+static ssize_t parse_status_reg(unsigned long *status, char *buf)
+{
+	/* print debug if buf is NULL */
+	if (!buf) {
+		pr_debug("rf_status: 0x%08lx - done=%d, cfgena=%d, busy=%d, fail=%d, devver=%d, err=%s\n",
+			*status, test_bit(DONE, status),
+			test_bit(ENAB, status),
+			test_bit(BUSY, status),
+			test_bit(FAIL, status),
+			test_bit(DVER, status),
+			get_err_string(get_err(status)));
+		return 0;
+	}
+
+	return scnprintf(buf, PAGE_SIZE,
+		"rf_status: 0x%08lx - done=%d, cfgena=%d, busy=%d, fail=%d, devver=%d, err=%s\n",
+		*status, test_bit(DONE, status), test_bit(ENAB, status),
+		test_bit(BUSY, status), test_bit(FAIL, status),
+		test_bit(DVER, status), get_err_string(get_err(status)));
+}
+
 static int calc_hash(const unsigned char *data, size_t len,
 		     unsigned char *digest)
 {
@@ -45,7 +106,7 @@ static int calc_hash(const unsigned char *data, size_t len,
 	struct sdesc *sdesc;
 	int size, ret;
 
-	alg = crypto_alloc_shash("md5", CRYPTO_ALG_TYPE_SHASH, 0);
+	alg = crypto_alloc_shash(DIGEST_NAME, CRYPTO_ALG_TYPE_SHASH, 0);
 	if (IS_ERR(alg)) {
 		pr_info("can't allocate hash algorithm\n");
 		return PTR_ERR(alg);
@@ -173,7 +234,7 @@ static int get_status(struct rfdev_device *rfdev, unsigned long *status)
 		*status |= (val << (i * 8));
 	}
 
-	pr_debug("%s: received 0x%08x\n", __func__, *status);
+	parse_status_reg(status, NULL);
 	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b011, 3);   // goto Run-Test
 
 	return 0;
@@ -241,7 +302,7 @@ static ssize_t rf_status_show(struct device *dev,
 	if (err)
 		return err;
 
-	return scnprintf(buf, PAGE_SIZE, "0x%08x\n", status);
+	return parse_status_reg(&status, buf);
 }
 
 static ssize_t digest_show(struct device *dev,
