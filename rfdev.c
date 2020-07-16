@@ -471,8 +471,23 @@ static int rfdev_fpga_ops_config_complete(struct fpga_manager *mgr,
 
 static enum fpga_mgr_states rfdev_fpga_ops_state(struct fpga_manager *mgr)
 {
+	struct i2c_client *client;
+	struct rfdev_device *rfdev;
+	unsigned long status;
+
 	pr_debug("%s: called\n", __func__);
-	return 0;
+
+	client = dev_get_drvdata(&mgr->dev);
+	rfdev  = i2c_get_clientdata(client);
+
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0x7f, 0);	      // goto Run-Test
+
+	get_status(rfdev, &status);
+	if (!test_bit(BUSY, &status) && test_bit(DONE, &status) &&
+	    get_err(&status) == ENOERR)
+		return FPGA_MGR_STATE_OPERATING;
+
+	return FPGA_MGR_STATE_UNKNOWN;
 }
 
 static const struct fpga_manager_ops rfdev_fpga_ops = {
