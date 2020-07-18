@@ -40,7 +40,8 @@
 #define EOVERFL	6 /* overflow error */
 #define ESDMEOF	7 /* SDM EOF */
 
-static struct fpga_manager *fpga_mgr;
+static struct fpga_manager *rfe_mgr;
+static struct fpga_manager *rfw_mgr;
 
 struct rfdev_client {
 	struct i2c_client *client;
@@ -578,17 +579,31 @@ static int rfdev_probe(struct i2c_client *client,
 		goto dummy_clean_out;
 	}
 
-	/* Create and register fpga manager */
-	fpga_mgr = devm_fpga_mgr_create(dev, "RFDev MachXO2 FPGA Manager",
+	/* Create and register fpga managers */
+	rfe_mgr = devm_fpga_mgr_create(dev, "RFEast MachXO2 FPGA Manager",
 					&rfdev_fpga_ops, NULL);
-	if (!fpga_mgr) {
+	if (!rfe_mgr) {
 		err = -ENOMEM;
 		goto dummy_clean_out;
 	}
-	dev_set_drvdata(&fpga_mgr->dev, client);
-	err = fpga_mgr_register(fpga_mgr);
+	dev_set_drvdata(&rfe_mgr->dev, client);
+	err = fpga_mgr_register(rfe_mgr);
 	if (err) {
 		pr_err("%s: unable to register FPGA manager\n", __func__);
+		goto dummy_clean_out;
+	}
+
+	rfw_mgr = devm_fpga_mgr_create(dev, "RFWest MachXO2 FPGA Manager",
+					&rfdev_fpga_ops, NULL);
+	if (!rfw_mgr) {
+		err = -ENOMEM;
+		goto dummy_clean_out;
+	}
+	dev_set_drvdata(&rfw_mgr->dev, client);
+	err = fpga_mgr_register(rfw_mgr);
+	if (err) {
+		pr_err("%s: unable to register FPGA manager\n", __func__);
+		fpga_mgr_unregister(rfe_mgr);
 		goto dummy_clean_out;
 	}
 
@@ -605,8 +620,10 @@ static int rfdev_remove(struct i2c_client *client)
 
 	pr_debug("%s: remove called\n", DEV_NAME);
 
-	if (fpga_mgr)
-		fpga_mgr_unregister(fpga_mgr);
+	if (rfe_mgr)
+		fpga_mgr_unregister(rfe_mgr);
+	if (rfw_mgr)
+		fpga_mgr_unregister(rfw_mgr);
 	rfdev_remove_dummy_clients(rfdev);
 
 	return 0;
