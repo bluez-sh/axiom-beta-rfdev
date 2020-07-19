@@ -268,6 +268,34 @@ static int wait_not_busy(struct rfdev_device *rfdev)
 	return 0;
 }
 
+static void reset_fpga(struct rfdev_device *rfdev)
+{
+	unsigned long status;
+
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0x7f, 0);	      // goto Run-Test
+
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-IR
+	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, RF_LSC_REFRESH, 0);
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-DR
+	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, 0x00, 0);
+	pr_debug("%s: sent command 0x%02x", __func__, RF_LSC_REFRESH);
+
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0b01, 0);	      // goto Run-Test
+	if (wait_not_busy(rfdev) < 0)
+		goto fail;
+
+	get_status(rfdev, &status);
+	if (!test_bit(DONE, &status))
+		goto fail;
+
+	goto out;
+
+fail:
+	pr_err("%s: failed to reset fpga\n");
+out:
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0xff, 0);	      // goto Reset
+}
+
 static ssize_t idcode_show(struct device *dev,
 			   struct device_attribute *attr, char *buf)
 {
@@ -620,6 +648,7 @@ static int rfdev_remove(struct i2c_client *client)
 
 	pr_debug("%s: remove called\n", DEV_NAME);
 
+	reset_fpga(rfdev);
 	if (rfe_mgr)
 		fpga_mgr_unregister(rfe_mgr);
 	if (rfw_mgr)
