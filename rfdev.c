@@ -83,7 +83,7 @@ static ssize_t parse_status_reg(unsigned long *status, char *buf)
 {
 	/* print debug if buf is NULL */
 	if (!buf) {
-		pr_debug("rf_status: 0x%08lx - done=%d, cfgena=%d, busy=%d, fail=%d, devver=%d, err=%s\n",
+		pr_debug("status: 0x%08lx - done=%d, cfgena=%d, busy=%d, fail=%d, devver=%d, err=%s\n",
 			*status, test_bit(DONE, status),
 			test_bit(ENAB, status),
 			test_bit(BUSY, status),
@@ -94,8 +94,8 @@ static ssize_t parse_status_reg(unsigned long *status, char *buf)
 	}
 
 	return scnprintf(buf, PAGE_SIZE,
-		"rf_status: 0x%08lx - done=%d, cfgena=%d, busy=%d, fail=%d, devver=%d, err=%s\n",
-		*status, test_bit(DONE, status), test_bit(ENAB, status),
+		"done=%d, cfgena=%d, busy=%d, fail=%d, devver=%d, err=%s\n",
+		test_bit(DONE, status), test_bit(ENAB, status),
 		test_bit(BUSY, status), test_bit(FAIL, status),
 		test_bit(DVER, status), get_err_string(get_err(status)));
 }
@@ -259,7 +259,7 @@ static int wait_not_busy(struct rfdev_device *rfdev)
 		if (++loop >= RF_MAX_BSY_LOOP)
 			return -EBUSY;
 
-		pr_debug("%s: received 0x%02x\n", __func__, val & 0xff);
+		pr_debug("%s: received 0x%02lx\n", __func__, val & 0xff);
 
 		i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN,
 				0b01, 2);	// goto Run-Test
@@ -291,7 +291,7 @@ static void reset_fpga(struct rfdev_device *rfdev)
 	goto out;
 
 fail:
-	pr_err("%s: failed to reset fpga\n");
+	pr_err("%s: failed to reset fpga\n", __func__);
 out:
 	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0xff, 0);	      // goto Reset
 }
@@ -315,8 +315,28 @@ static ssize_t idcode_show(struct device *dev,
 	return scnprintf(buf, PAGE_SIZE, "0x%08x\n", idcode);
 }
 
-static ssize_t rf_status_show(struct device *dev,
-			      struct device_attribute *attr, char *buf)
+static ssize_t stat_show(struct device *dev,
+		         struct device_attribute *attr, char *buf)
+{
+	struct i2c_client *client;
+	struct rfdev_device *rfdev;
+	unsigned long status;
+
+	pr_debug("%s: called\n", __func__);
+
+	client = dev_get_drvdata(dev);
+	rfdev  = i2c_get_clientdata(client);
+
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0x7f, 0);	      // goto Run-Test
+	get_status(rfdev, &status);
+
+	return scnprintf(buf, PAGE_SIZE, "0x%08lx\n", status);
+}
+
+
+
+static ssize_t statstr_show(struct device *dev,
+			    struct device_attribute *attr, char *buf)
 {
 	struct i2c_client *client;
 	struct rfdev_device *rfdev;
@@ -354,12 +374,14 @@ static ssize_t digest_show(struct device *dev,
 }
 
 static DEVICE_ATTR_RO(idcode);
-static DEVICE_ATTR_RO(rf_status);
+static DEVICE_ATTR_RO(stat);
+static DEVICE_ATTR_RO(statstr);
 static DEVICE_ATTR_RO(digest);
 
 static struct attribute *dev_attrs[] = {
 	&dev_attr_idcode.attr,
-	&dev_attr_rf_status.attr,
+	&dev_attr_stat.attr,
+	&dev_attr_statstr.attr,
 	&dev_attr_digest.attr,
 	NULL,
 };
