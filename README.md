@@ -14,7 +14,7 @@ Linux runs on hardened ARM cores in Zynq SoC, which is where the driver comes in
 <code>$ cat /sys/class/fpga_manager/<i>fpga#</i>/idcode</code>
 - sysfs entry to read out status register <br>
 <code>$ cat /sys/class/fpga_manager/<i>fpga#</i>/stat</code>
-- sysfs entry to read out human readable string for status<br>
+- sysfs entry to show human readable string for status<br>
 <code>$ cat /sys/class/fpga_manager/<i>fpga#</i>/statstr</code>
 - sysfs entry to show md5 digest of the uploaded bitstream<br>
 <code>$ cat /sys/class/fpga_manager/<i>fpga#</i>/digest</code>
