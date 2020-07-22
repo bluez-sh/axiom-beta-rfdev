@@ -196,73 +196,56 @@ static int i2c_pic_write_block(struct rfdev_device *rfdev,
 			get_i2c_client(rfdev, opr), cmd, len, data);
 }
 
-static int get_idcode(struct rfdev_device *rfdev, uint32_t *idcode)
+static int rf_cmd_out(struct rfdev_device *rfdev,
+		      enum rf_jtag_cmd cmd,
+		      uint64_t *val, int num_bytes)
 {
 	int i;
 
 	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4); // goto Shift-IR
-	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, RF_IDCODE, 0);
+	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, cmd, 0);
 	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4); // goto Shift-DR
 
-	*idcode = 0;
-	for (i = 3; i >= 0; i--) {
-		int val = i2c_pic_read(rfdev, PIC_RD_TDO_IN_CONT);
+	*val = 0;
+	while (num_bytes--) {
+		int byte = i2c_pic_read(rfdev, PIC_RD_TDO_IN_CONT);
 
-		if (val < 0)
-			return val;
-		*idcode |= (val << (i * 8));
+		if (byte < 0)
+			return byte;
+		*val = (*val << 8) | byte;
 	}
 
 	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b011, 3);  // goto Run-Test
-
 	return 0;
 }
 
 static int get_status(struct rfdev_device *rfdev, unsigned long *status)
 {
-	int i;
+	uint64_t tmp;
+	int err;
 
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-IR
-	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, RF_LSC_READ_STATUS, 0);
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-DR
-
-	*status = 0;
-	for (i = 3; i >= 0; i--) {
-		int val = i2c_pic_read(rfdev, PIC_RD_TDO_IN_CONT);
-
-		if (val < 0)
-			return val;
-		*status |= (val << (i * 8));
-	}
-
+	err = rf_cmd_out(rfdev, RF_LSC_READ_STATUS, &tmp, 4);
+	if (err)
+		return err;
+	*status = (uint32_t) tmp;
 	parse_status_reg(status, NULL);
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b011, 3);   // goto Run-Test
-
 	return 0;
 }
 
 static int wait_not_busy(struct rfdev_device *rfdev)
 {
-	long val;
+	uint64_t val;
 	int loop = 0;
+	int err;
 
 	do {
-		i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN,
-				0b0011, 4);	// goto Shift-IR
-		i2c_pic_write(rfdev, PIC_WR_TDI_OUT, RF_LSC_CHECK_BUSY, 0);
-		i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN,
-				0b0011, 4);	// goto Shift-DR
+		err = rf_cmd_out(rfdev, RF_LSC_CHECK_BUSY, &val, 1);
+		if (err)
+			return err;
+		pr_debug("%s: received 0x%02x\n", __func__, (uint8_t) val);
 
-		val = i2c_pic_read(rfdev, PIC_RD_TDO_IN);
-		if (val < 0)
-			return val;
 		if (++loop >= RF_MAX_BSY_LOOP)
 			return -EBUSY;
-
-		pr_debug("%s: received 0x%02lx\n", __func__, val & 0xff);
-
-		i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN,
-				0b01, 2);	// goto Run-Test
 	} while (test_bit(7, (unsigned long *) &val));
 
 	return 0;
@@ -301,26 +284,27 @@ static ssize_t idcode_show(struct device *dev,
 {
 	struct i2c_client *client;
 	struct rfdev_device *rfdev;
-	uint32_t idcode;
+	uint64_t idcode;
 	int err;
 
 	client = dev_get_drvdata(dev);
 	rfdev  = i2c_get_clientdata(client);
 
 	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0x7f, 0);	// goto Run-Test
-	err = get_idcode(rfdev, &idcode);
+	err = rf_cmd_out(rfdev, RF_IDCODE, &idcode, 4);
 	if (err)
 		return err;
 
-	return scnprintf(buf, PAGE_SIZE, "0x%08x\n", idcode);
+	return scnprintf(buf, PAGE_SIZE, "0x%08x\n", (uint32_t) idcode);
 }
 
 static ssize_t stat_show(struct device *dev,
-		         struct device_attribute *attr, char *buf)
+			 struct device_attribute *attr, char *buf)
 {
 	struct i2c_client *client;
 	struct rfdev_device *rfdev;
 	unsigned long status;
+	int err;
 
 	pr_debug("%s: called\n", __func__);
 
@@ -328,12 +312,12 @@ static ssize_t stat_show(struct device *dev,
 	rfdev  = i2c_get_clientdata(client);
 
 	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0x7f, 0);	      // goto Run-Test
-	get_status(rfdev, &status);
+	err = get_status(rfdev, &status);
+	if (err)
+		return err;
 
 	return scnprintf(buf, PAGE_SIZE, "0x%08lx\n", status);
 }
-
-
 
 static ssize_t statstr_show(struct device *dev,
 			    struct device_attribute *attr, char *buf)
@@ -373,16 +357,57 @@ static ssize_t digest_show(struct device *dev,
 	return ptr + 1;
 }
 
+static ssize_t traceid_show(struct device *dev,
+			    struct device_attribute *attr, char *buf)
+{
+	struct i2c_client *client;
+	struct rfdev_device *rfdev;
+	uint64_t traceid;
+	int err;
+
+	client = dev_get_drvdata(dev);
+	rfdev  = i2c_get_clientdata(client);
+
+	err = rf_cmd_out(rfdev, RF_UIDCODE_PUB, &traceid, 8);
+	if (err)
+		return err;
+
+	return scnprintf(buf, PAGE_SIZE, "0x%016llx\n", traceid);
+}
+
+static ssize_t usercode_show(struct device *dev,
+			     struct device_attribute *attr, char *buf)
+{
+	struct i2c_client *client;
+	struct rfdev_device *rfdev;
+	uint64_t usercode;
+	int err;
+
+	client = dev_get_drvdata(dev);
+	rfdev  = i2c_get_clientdata(client);
+
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0x7f, 0);	// goto Run-Test
+	err = rf_cmd_out(rfdev, RF_USERCODE, &usercode, 4);
+	if (err)
+		return err;
+
+	return scnprintf(buf, PAGE_SIZE, "0x%08x\n", (uint32_t) usercode);
+}
+
 static DEVICE_ATTR_RO(idcode);
 static DEVICE_ATTR_RO(stat);
 static DEVICE_ATTR_RO(statstr);
 static DEVICE_ATTR_RO(digest);
+static DEVICE_ATTR_RO(traceid);
+static DEVICE_ATTR_RO(usercode);
 
 static struct attribute *dev_attrs[] = {
 	&dev_attr_idcode.attr,
 	&dev_attr_stat.attr,
 	&dev_attr_statstr.attr,
 	&dev_attr_digest.attr,
+	&dev_attr_traceid.attr,
+	&dev_attr_usercode.attr,
 	NULL,
 };
 

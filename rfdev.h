@@ -35,7 +35,7 @@ enum i2c_client_read_opr {
 	PIC_RD_F = 16,
 };
 
-enum rf_jtag_instr {
+enum rf_jtag_cmd {
 	RF_ISC_DATA_SHIFT          = 0x0A,
 	RF_ISC_ERASE               = 0x0E,
 	RF_ISC_DISCHARGE           = 0x14,
