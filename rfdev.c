@@ -646,31 +646,36 @@ static int rfdev_probe(struct i2c_client *client,
 	}
 
 	/* Create and register fpga managers */
-	rfe_mgr = devm_fpga_mgr_create(dev, "RFEast MachXO2 FPGA Manager",
+	if (!id->driver_data) {
+		rfw_mgr = devm_fpga_mgr_create(dev,
+					"RFWest MachXO2 FPGA Manager",
 					&rfdev_fpga_ops, NULL);
-	if (!rfe_mgr) {
-		err = -ENOMEM;
-		goto dummy_clean_out;
-	}
-	dev_set_drvdata(&rfe_mgr->dev, client);
-	err = fpga_mgr_register(rfe_mgr);
-	if (err) {
-		pr_err("%s: unable to register FPGA manager\n", __func__);
-		goto dummy_clean_out;
-	}
-
-	rfw_mgr = devm_fpga_mgr_create(dev, "RFWest MachXO2 FPGA Manager",
+		if (!rfw_mgr) {
+			err = -ENOMEM;
+			goto dummy_clean_out;
+		}
+		dev_set_drvdata(&rfw_mgr->dev, client);
+		err = fpga_mgr_register(rfw_mgr);
+		if (err) {
+			pr_err("%s: unable to register RFWest FPGA manager\n",
+					__func__);
+			goto dummy_clean_out;
+		}
+	} else {
+		rfe_mgr = devm_fpga_mgr_create(dev,
+					"RFEast MachXO2 FPGA Manager",
 					&rfdev_fpga_ops, NULL);
-	if (!rfw_mgr) {
-		err = -ENOMEM;
-		goto dummy_clean_out;
-	}
-	dev_set_drvdata(&rfw_mgr->dev, client);
-	err = fpga_mgr_register(rfw_mgr);
-	if (err) {
-		pr_err("%s: unable to register FPGA manager\n", __func__);
-		fpga_mgr_unregister(rfe_mgr);
-		goto dummy_clean_out;
+		if (!rfe_mgr) {
+			err = -ENOMEM;
+			goto dummy_clean_out;
+		}
+		dev_set_drvdata(&rfe_mgr->dev, client);
+		err = fpga_mgr_register(rfe_mgr);
+		if (err) {
+			pr_err("%s: unable to register RFEast FPGA manager\n",
+					__func__);
+			goto dummy_clean_out;
+		}
 	}
 
 	return 0;
@@ -687,23 +692,29 @@ static int rfdev_remove(struct i2c_client *client)
 	pr_debug("%s: remove called\n", DEV_NAME);
 
 	reset_fpga(rfdev);
-	if (rfe_mgr)
-		fpga_mgr_unregister(rfe_mgr);
-	if (rfw_mgr)
+	if (rfw_mgr) {
 		fpga_mgr_unregister(rfw_mgr);
+		rfw_mgr = NULL;
+	}
+	if (rfe_mgr) {
+		fpga_mgr_unregister(rfe_mgr);
+		rfe_mgr = NULL;
+	}
 	rfdev_remove_dummy_clients(rfdev);
 
 	return 0;
 }
 
 static const struct of_device_id rfdev_of_match[] = {
-	{ .compatible = "apertus,pic-rf-interface" },
+	{ .compatible = "apertus,pic-rfw-interface" },
+	{ .compatible = "apertus,pic-rfe-interface" },
 	{ },
 };
 MODULE_DEVICE_TABLE(of, rfdev_of_match);
 
 static const struct i2c_device_id rfdev_idtable[] = {
-	{ "pic-rf-interface", 0 },
+	{ "pic-rfw-interface", 0 },
+	{ "pic-rfe-interface", 1 },
 	{ },
 };
 MODULE_DEVICE_TABLE(i2c, rfdev_idtable);
@@ -714,6 +725,8 @@ static struct i2c_driver rfdev_driver = {
 	.id_table = rfdev_idtable,
 	.driver   = {
 		.name = "rfdev",
+		.of_match_table = of_match_ptr(rfdev_of_match),
+		.owner = THIS_MODULE,
 	},
 };
 
