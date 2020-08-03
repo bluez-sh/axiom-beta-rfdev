@@ -18,12 +18,39 @@ Linux runs on hardened ARM cores in Zynq SoC, which is where the driver comes in
 <code>$ cat /sys/class/fpga_manager/<i>fpga#</i>/statstr</code>
 - sysfs entry to show md5 digest of the uploaded bitstream<br>
 <code>$ cat /sys/class/fpga_manager/<i>fpga#</i>/digest</code>
+- RFWest and RFEast can be used seperately for AXIOM Betas with old
+power board version (the one with PCA9540 mux for the PICs)
 
 ## Requires
-A devicetree entry must be added to system i2c bus (2) in AXIOM Beta:
+Following devicetree description must be added to system i2c bus (2) in AXIOM Beta:
 ```
-pic@40 {
-    compatible = "apertus,pic-rf-interface";
+mux@70 {
+	compatible = "nxp,pca9540";
+	reg = <0x70>;
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	i2c@0 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0>;
+
+		pic@40 {
+			compatible = "apertus,pic-rfw-interface";
+			reg = <0x40>;
+		};
+	};
+
+	i2c@1 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <1>;
+
+		pic@40 {
+			compatible = "apertus,pic-rfe-interface";
+			reg = <0x40>;
+		};
+	};
 };
 ```
 ## Build Instructions
