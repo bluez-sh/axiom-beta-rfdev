@@ -18,41 +18,13 @@ Linux runs on hardened ARM cores in Zynq SoC, which is where the driver comes in
 <code>$ cat /sys/class/fpga_manager/<i>fpga#</i>/statstr</code>
 - sysfs entry to show md5 digest of the uploaded bitstream<br>
 <code>$ cat /sys/class/fpga_manager/<i>fpga#</i>/digest</code>
-- RFWest and RFEast can be used seperately for AXIOM Betas with old
-power board version (the one with PCA9540 mux for the PICs)
+- RFWest and RFEast can be used seperately for AXIOM Betas with both old and new power board versions
 
 ## Requires
-Following devicetree description must be added to system i2c bus (2) in AXIOM Beta:
-```
-mux@70 {
-	compatible = "nxp,pca9540";
-	reg = <0x70>;
-	#address-cells = <1>;
-	#size-cells = <0>;
+Appropriate devicetree overlay must be loaded in AXIOM Beta:<br>
+<code>dt-overlay/pic_rf_mux_overlay.dts</code> for old power board (the one with PCA9540 mux)<br>
+<code>dt-overlay/pic_rf_switch_overlay.dts</code> for new power board (the one with TS3A4751 analog switch)
 
-	i2c@0 {
-		#address-cells = <1>;
-		#size-cells = <0>;
-		reg = <0>;
-
-		pic@40 {
-			compatible = "apertus,pic-rfw-interface";
-			reg = <0x40>;
-		};
-	};
-
-	i2c@1 {
-		#address-cells = <1>;
-		#size-cells = <0>;
-		reg = <1>;
-
-		pic@40 {
-			compatible = "apertus,pic-rfe-interface";
-			reg = <0x40>;
-		};
-	};
-};
-```
 ## Build Instructions
 1. <code>git clone --recursive https://github.com/apertus-open-source-cinema/axiom-firmware</code>
 2. <code>cd axiom-firmware</code>
