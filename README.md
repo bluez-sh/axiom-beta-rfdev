@@ -22,8 +22,8 @@ Linux runs on hardened ARM cores in Zynq SoC, which is where the driver comes in
 
 ## Requires
 Appropriate devicetree overlay must be loaded in AXIOM Beta:<br>
-<code>dt-overlay/pic_rf_mux_overlay.dts</code> for old power board (the one with PCA9540 mux)<br>
-<code>dt-overlay/pic_rf_switch_overlay.dts</code> for new power board (the one with TS3A4751 analog switch)
+- <code>dt-overlay/pic_rf_mux_overlay.dts</code> for old power board (the one with PCA9540 mux)<br>
+- <code>dt-overlay/pic_rf_switch_overlay.dts</code> for new power board (the one with TS3A4751 analog switch)
 
 ## Build Instructions
 1. <code>git clone --recursive https://github.com/apertus-open-source-cinema/axiom-firmware</code>
