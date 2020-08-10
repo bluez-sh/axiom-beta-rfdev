@@ -1,0 +1,69 @@
+/dts-v1/;
+/plugin/;
+	    
+/ {
+	fragment@0 {
+		target = <&i2c_gpio>;
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			gpio_exp_20: mcp23018@20 {
+				#gpio-cells = <2>;
+				gpio-controller;
+				compatible = "microchip,mcp23018";
+				reg = <0x20>;
+			};
+			gpio_exp_21: mcp23018@21 {
+				#gpio-cells = <2>;
+				gpio-controller;
+				compatible = "microchip,mcp23018";
+				reg = <0x21>;
+			};
+			gpio_exp_22: mcp23018@22 {
+				#gpio-cells = <2>;
+				gpio-controller;
+				compatible = "microchip,mcp23018";
+				reg = <0x22>;
+			};
+			gpio_exp_23: mcp23018@23 {
+				#gpio-cells = <2>;
+				gpio-controller;
+				compatible = "microchip,mcp23018";
+				reg = <0x23>;
+			};
+		};
+	};
+
+	fragment@1 {
+		target = <&amba>;
+		__overlay__ {
+			analog_switch {
+				compatible = "i2c-mux-gpio";
+				#address-cells = <1>;
+				#size-cells = <0>;
+				mux-gpios = <&gpio_exp_22 14 0 &gpio_exp_22 15 0>;
+				i2c-parent = <&i2c1>;
+
+				i2c@1 {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <1>;
+					pic@40 {
+						compatible = "apertus,pic-rfw-interface";
+						reg = <0x40>;
+					};
+				};
+
+				i2c@2 {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <2>;
+					pic@40 {
+						compatible = "apertus,pic-rfe-interface";
+						reg = <0x40>;
+					};
+				};
+			};
+		};
+	};
+};
