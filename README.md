@@ -18,6 +18,10 @@ Linux runs on hardened ARM cores in Zynq SoC, which is where the driver comes in
 <code>$ cat /sys/class/fpga_manager/<i>fpga#</i>/statstr</code>
 - sysfs entry to show md5 digest of the uploaded bitstream<br>
 <code>$ cat /sys/class/fpga_manager/<i>fpga#</i>/digest</code>
+- sysfs entry to read out traceid (unique fpga identifier)<br>
+<code>$ cat /sys/class/fpga_manager/<i>fpga#</i>/traceid</code>
+- sysfs entry to read out usercode<br>
+<code>$ cat /sys/class/fpga_manager/<i>fpga#</i>/usercode</code>
 - RFWest and RFEast can be used seperately for AXIOM Betas with both old and new power board versions
 
 ## Requires
