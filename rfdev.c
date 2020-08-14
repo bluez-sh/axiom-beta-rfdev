@@ -12,7 +12,7 @@
 #include <linux/slab.h>
 #include <linux/fpga/fpga-mgr.h>
 #include <linux/miscdevice.h>
-#include <linux/string.h>
+#include <linux/kdev_t.h>
 #include <crypto/internal/hash.h>
 
 #include "rfdev.h"
@@ -572,11 +572,9 @@ static const struct fpga_manager_ops rfdev_fpga_ops = {
 
 static int rfdev_open(struct inode *inode, struct file *file)
 {
-	char *fname = file->f_path.dentry->d_iname;
-
-	if (!strcmp(fname, rfw_misc.name))
+	if (MINOR(inode->i_rdev) == (unsigned) rfw_misc.minor)
 		file->private_data = &rfw_mgr->dev;
-	else if (!strcmp(fname, rfe_misc.name))
+	else if (MINOR(inode->i_rdev) == (unsigned) rfe_misc.minor)
 		file->private_data = &rfe_mgr->dev;
 	else
 		return -ENODEV;
