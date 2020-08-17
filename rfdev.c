@@ -16,6 +16,7 @@
 #include <crypto/internal/hash.h>
 
 #include "rfdev.h"
+#include "rfdev-uapi.h"
 
 #define DEV_NAME		"rfdev"
 #define DIGEST_NAME		"md5"
@@ -187,17 +188,24 @@ static int i2c_pic_write_block(struct rfdev_device *rfdev,
 {
 	char data_str[RF_MAX_TX_SIZE * 3 + 2];
 	unsigned int i, ptr = 0;
+	int ret;
 
 	for (i = 0; i < len; i++)
 		ptr += scnprintf(data_str + ptr,
 				sizeof(data_str) - ptr, "%02X ", data[i]);
 	if (ptr > 0)
 		data_str[ptr - 1] = '\0';
+	else
+		data_str[0] = '\0';
 
 	pr_debug("smbus_write %02X <- %02X %s\n",
 			get_i2c_client(rfdev, opr)->addr, cmd, data_str);
-	return i2c_smbus_write_i2c_block_data(
-			get_i2c_client(rfdev, opr), cmd, len, data);
+	if (!len)
+		ret = i2c_smbus_write_byte(get_i2c_client(rfdev, opr), cmd);
+	else
+		ret = i2c_smbus_write_i2c_block_data(
+				get_i2c_client(rfdev, opr), cmd, len, data);
+	return ret;
 }
 
 static int rf_cmd_in(struct rfdev_device *rfdev,
@@ -237,6 +245,62 @@ static int rf_cmd_out(struct rfdev_device *rfdev,
 		*val = (*val << 8) | byte;
 	}
 	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0b011, 0);	     // goto Run-Test
+	return 0;
+}
+
+static int rf_tdo_in(struct rfdev_device *rfdev,
+		     uint8_t *data, size_t size)
+{
+	int i, byte;
+
+	for (i = 0; i < size; i++) {
+		byte = i2c_pic_read(rfdev, PIC_RD_TDO_IN_CONT);
+		if (byte < 0)
+			return byte;
+		data[i] = byte & 0xff;
+	}
+	return 0;
+}
+
+static int rf_tdi_out(struct rfdev_device *rfdev,
+		      const uint8_t *data, size_t size,
+		      size_t num_bits)
+{
+	unsigned char rbuf[RF_MAX_TX_SIZE];
+	unsigned int c, i, idx, rem_bits;
+	int err;
+
+	rem_bits = BITS_PER_BYTE * size - num_bits;
+
+	for (i = 0; size > 0; size -= c, i += c) {
+		c = min(RF_MAX_TX_SIZE, size);
+
+		for (idx = 0; idx < c; idx++)
+			rbuf[idx] = rev_byte(data[i + idx]);
+
+		if (c == 1) {
+			/* handle the last byte */
+			if (rem_bits)
+				err = i2c_pic_write(rfdev,
+						PIC_WR_TDI_OUT_LEN_CONT,
+						rbuf[0], rem_bits);
+			else
+				err = i2c_pic_write(rfdev,
+						PIC_WR_TDI_OUT_CONT,
+						rbuf[0], 0);
+		} else if (size <= RF_MAX_TX_SIZE) {
+			/* leave out the last byte for last transfer */
+			err = i2c_pic_write_block(rfdev,
+					PIC_WR_TDI_OUT_CONT,
+					rbuf[0], c - 2, &rbuf[1]);
+			c--;
+		} else {
+			err = i2c_pic_write_block(rfdev, PIC_WR_TDI_OUT_CONT,
+					rbuf[0], c - 1, &rbuf[1]);
+		}
+		if (err)
+			return err;
+	}
 	return 0;
 }
 
@@ -482,32 +546,12 @@ static int rfdev_fpga_ops_config_write(struct fpga_manager *mgr,
 {
 	struct i2c_client *client;
 	struct rfdev_device *rfdev;
-	unsigned char rbuf[RF_MAX_TX_SIZE];
-	unsigned int c, i, idx;
-	int err;
 
 	client = dev_get_drvdata(&mgr->dev);
 	rfdev  = i2c_get_clientdata(client);
 
 	calc_hash(buf, count, rfdev->digest);
-
-	for (i = 0; count > 0; count -= c, i += c) {
-		c = min(RF_MAX_TX_SIZE, count);
-
-		for (idx = 0; idx < c; idx++)
-			rbuf[idx] = rev_byte(buf[i + idx]);
-
-		if (c == 1)
-			err = i2c_pic_write(rfdev, PIC_WR_TDI_OUT_CONT,
-					rbuf[0], 0);
-		else
-			err = i2c_pic_write_block(rfdev, PIC_WR_TDI_OUT_CONT,
-					rbuf[0], c - 1, &rbuf[1]);
-		if (err)
-			return err;
-	}
-
-	return 0;
+	return rf_tdi_out(rfdev, buf, count, BITS_PER_BYTE * count);
 }
 
 static int rfdev_fpga_ops_config_complete(struct fpga_manager *mgr,
@@ -570,11 +614,53 @@ static const struct fpga_manager_ops rfdev_fpga_ops = {
 	.groups			= rfdev_attr_groups,
 };
 
+static int rf_jtag_xfer(struct rfdev_device *rfdev,
+			struct jtag_xfer *xfer,
+			uint8_t *data, size_t size)
+{
+	int ret;
+
+	if (xfer->endstate != JTAG_STATE_IDLE) {
+		pr_err("xfer endstate: other than idle not implemented\n");
+		return -EINVAL;
+	}
+
+	if (xfer->direction == JTAG_WRITE_XFER) {
+		if (xfer->type == JTAG_SDR_XFER)
+			// goto Shift-DR
+			i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b001, 3);
+		else if (xfer->type == JTAG_SIR_XFER)
+			// goto Shift-IR
+			i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);
+		else
+			return -EINVAL;
+
+		ret = rf_tdi_out(rfdev, data, size, xfer->length);
+	} else if (xfer->direction == JTAG_READ_XFER) {
+		if (xfer->type == JTAG_SDR_XFER)
+			// goto Shift-DR
+			i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b001, 3);
+		else if (xfer->type == JTAG_SIR_XFER)
+			// goto Shift-IR
+			i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);
+		else
+			return -EINVAL;
+
+		ret = rf_tdo_in(rfdev, data, size);
+	} else {
+		pr_err("xfer direction: both read-write not implemented\n");
+		return -EINVAL;
+	}
+
+	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0b011, 0);	// goto Run-Test
+	return ret;
+}
+
 static int rfdev_open(struct inode *inode, struct file *file)
 {
-	if (MINOR(inode->i_rdev) == (unsigned) rfw_misc.minor)
+	if (MINOR(inode->i_rdev) == (unsigned int) rfw_misc.minor)
 		file->private_data = &rfw_mgr->dev;
-	else if (MINOR(inode->i_rdev) == (unsigned) rfe_misc.minor)
+	else if (MINOR(inode->i_rdev) == (unsigned int) rfe_misc.minor)
 		file->private_data = &rfe_mgr->dev;
 	else
 		return -ENODEV;
@@ -586,15 +672,75 @@ static long rfdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	struct device *dev = file->private_data;
 	struct i2c_client *client;
 	struct rfdev_device *rfdev;
-	unsigned long status;
+	struct jtag_end_tap_state endstate;
+	struct jtag_xfer xfer;
+	uint8_t *xfer_data;
+	size_t data_size;
+	int err = 0;
 
 	client = dev_get_drvdata(dev);
 	rfdev  = i2c_get_clientdata(client);
 
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0x7f, 0);	// goto Run-Test
-	get_status(rfdev, &status);
-	parse_status_reg(&status, NULL);
-	return 0;
+	if (!arg)
+		return -EINVAL;
+
+	switch (cmd) {
+	case JTAG_GIOCENDSTATE:
+		break;
+	case JTAG_SIOCSTATE:
+		if (copy_from_user(&endstate, (const void __user *)arg,
+					sizeof(struct jtag_end_tap_state)))
+			return -EFAULT;
+
+		if (endstate.endstate == JTAG_STATE_IDLE &&
+		    endstate.reset == JTAG_FORCE_RESET) {
+			i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0x7f, 0);
+		} else if (endstate.endstate == JTAG_STATE_TLRESET) {
+			i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0xff, 0);
+		} else {
+			pr_err("set state: only reset and idle through reset are implemented");
+			return -EINVAL;
+		}
+		break;
+	case JTAG_IOCXFER:
+		if (copy_from_user(&xfer, (const void __user *)arg,
+					sizeof(struct jtag_xfer)))
+			return -EFAULT;
+
+		if (xfer.length >= JTAG_MAX_XFER_DATA_LEN)
+			return -EINVAL;
+
+		if (xfer.direction > JTAG_READ_WRITE_XFER)
+			return -EINVAL;
+
+		if (xfer.endstate > JTAG_STATE_UPDATEIR)
+			return -EINVAL;
+
+		data_size = DIV_ROUND_UP(xfer.length, BITS_PER_BYTE);
+		xfer_data = memdup_user(u64_to_user_ptr(xfer.tdio), data_size);
+		if (IS_ERR(xfer_data))
+			return -EFAULT;
+
+		err = rf_jtag_xfer(rfdev, &xfer, xfer_data, data_size);
+		if (err) {
+			kfree(xfer_data);
+			return err;
+		}
+
+		err = copy_to_user(u64_to_user_ptr(xfer.tdio),
+					(void *)xfer_data, data_size);
+		kfree(xfer_data);
+		if (err)
+			return -EFAULT;
+
+		if (copy_to_user((void __user *)arg, (void *)&xfer,
+					sizeof(struct jtag_xfer)))
+			return -EFAULT;
+		break;
+	default:
+		return -EINVAL;
+	}
+	return err;
 }
 
 static const struct file_operations rfdev_fops = {
