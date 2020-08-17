@@ -53,7 +53,8 @@ struct rfdev_client {
 };
 
 struct rfdev_device {
-	unsigned char digest[DIGEST_SIZE];
+	uint8_t digest[DIGEST_SIZE];
+	uint8_t tap_state;
 	unsigned short int num_clients;
 	struct rfdev_client client[];
 };
@@ -208,22 +209,39 @@ static int i2c_pic_write_block(struct rfdev_device *rfdev,
 	return ret;
 }
 
+static int tap_advance(struct rfdev_device *rfdev, enum jtag_endstate endstate)
+{
+	int err;
+
+	if (rfdev->tap_state > JTAG_STATE_UPDATEIR) {
+		err = i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0xff, 0);
+		if (err)
+			return err;
+		rfdev->tap_state = JTAG_STATE_TLRESET;
+	}
+
+	err = i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN,
+			path_table[rfdev->tap_state][endstate].seq,
+			path_table[rfdev->tap_state][endstate].len);
+	if (err)
+		return err;
+	rfdev->tap_state = endstate;
+	return 0;
+}
+
 static int rf_cmd_in(struct rfdev_device *rfdev,
 		     enum rf_jtag_cmd cmd,
 		     const uint8_t *op, int num_op)
 {
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-IR
-	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, cmd, 0);
-	if (!num_op || !op) {
-		pr_debug("%s: sent command 0x%02x", __func__, cmd);
-		i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0b01, 0); // goto Run-Test
+	tap_advance(rfdev, JTAG_STATE_SHIFTIR);
+	i2c_pic_write(rfdev, PIC_WR_TDI_OUT_CONT, cmd, 0);
+	pr_debug("%s: sent command 0x%02x", __func__, cmd);
+	if (!num_op || !op)
 		return 0;
-	}
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-DR
+
+	tap_advance(rfdev, JTAG_STATE_SHIFTDR);
 	while (num_op-- > 0)
 		i2c_pic_write(rfdev, PIC_WR_TDI_OUT_CONT, op[num_op], 0);
-	pr_debug("%s: sent command 0x%02x", __func__, cmd);
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0b011, 0);	      // goto Run-Test
 	return 0;
 }
 
@@ -231,9 +249,9 @@ static int rf_cmd_out(struct rfdev_device *rfdev,
 		      enum rf_jtag_cmd cmd,
 		      uint64_t *val, int num_bytes)
 {
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4); // goto Shift-IR
-	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, cmd, 0);
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4); // goto Shift-DR
+	tap_advance(rfdev, JTAG_STATE_SHIFTIR);
+	i2c_pic_write(rfdev, PIC_WR_TDI_OUT_CONT, cmd, 0);
+	tap_advance(rfdev, JTAG_STATE_SHIFTDR);
 	pr_debug("%s: sent command 0x%02x", __func__, cmd);
 
 	*val = 0;
@@ -244,7 +262,6 @@ static int rf_cmd_out(struct rfdev_device *rfdev,
 			return byte;
 		*val = (*val << 8) | byte;
 	}
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0b011, 0);	     // goto Run-Test
 	return 0;
 }
 
@@ -340,8 +357,6 @@ static void reset_fpga(struct rfdev_device *rfdev)
 {
 	unsigned long status;
 
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0x7f, 0);	      // goto Run-Test
-
 	rf_cmd_in(rfdev, RF_LSC_REFRESH, (uint8_t []) {0x00}, 1);
 	if (wait_not_busy(rfdev) < 0)
 		goto fail;
@@ -355,7 +370,7 @@ static void reset_fpga(struct rfdev_device *rfdev)
 fail:
 	pr_err("%s: failed to reset fpga\n", __func__);
 out:
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0xff, 0);	      // goto Reset
+	tap_advance(rfdev, JTAG_STATE_TLRESET);
 }
 
 static ssize_t idcode_show(struct device *dev,
@@ -369,7 +384,6 @@ static ssize_t idcode_show(struct device *dev,
 	client = dev_get_drvdata(dev);
 	rfdev  = i2c_get_clientdata(client);
 
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0x7f, 0);	// goto Run-Test
 	err = rf_cmd_out(rfdev, RF_IDCODE, &idcode, 4);
 	if (err)
 		return err;
@@ -390,7 +404,6 @@ static ssize_t stat_show(struct device *dev,
 	client = dev_get_drvdata(dev);
 	rfdev  = i2c_get_clientdata(client);
 
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0x7f, 0);	      // goto Run-Test
 	err = get_status(rfdev, &status);
 	if (err)
 		return err;
@@ -409,7 +422,6 @@ static ssize_t statstr_show(struct device *dev,
 	client = dev_get_drvdata(dev);
 	rfdev  = i2c_get_clientdata(client);
 
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0x7f, 0);	// goto Run-Test
 	err = get_status(rfdev, &status);
 	if (err)
 		return err;
@@ -447,7 +459,6 @@ static ssize_t traceid_show(struct device *dev,
 	client = dev_get_drvdata(dev);
 	rfdev  = i2c_get_clientdata(client);
 
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0x7f, 0);	// goto Run-Test
 	err = rf_cmd_out(rfdev, RF_UIDCODE_PUB, &traceid, 8);
 	if (err)
 		return err;
@@ -466,7 +477,6 @@ static ssize_t usercode_show(struct device *dev,
 	client = dev_get_drvdata(dev);
 	rfdev  = i2c_get_clientdata(client);
 
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0x7f, 0);	// goto Run-Test
 	err = rf_cmd_out(rfdev, RF_USERCODE, &usercode, 4);
 	if (err)
 		return err;
@@ -514,8 +524,6 @@ static int rfdev_fpga_ops_config_init(struct fpga_manager *mgr,
 	client = dev_get_drvdata(&mgr->dev);
 	rfdev  = i2c_get_clientdata(client);
 
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0x7f, 0);	      // goto Run-Test
-
 	rf_cmd_in(rfdev, RF_ISC_ENABLE, (uint8_t []) {0x00}, 1);
 	err = wait_not_busy(rfdev);
 	if (err)
@@ -528,16 +536,15 @@ static int rfdev_fpga_ops_config_init(struct fpga_manager *mgr,
 
 	get_status(rfdev, &status);
 
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-IR
-	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, RF_LSC_BITSTREAM_BURST, 0);
+	tap_advance(rfdev, JTAG_STATE_SHIFTIR);
+	i2c_pic_write(rfdev, PIC_WR_TDI_OUT_CONT, RF_LSC_BITSTREAM_BURST, 0);
 	pr_debug("%s: sent command 0x%02x", __func__, RF_LSC_BITSTREAM_BURST);
 
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);  // goto Shift-DR
-
+	tap_advance(rfdev, JTAG_STATE_SHIFTDR);
 	return 0;
 
 err:
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0xff, 0);
+	tap_advance(rfdev, JTAG_STATE_TLRESET);
 	return err;
 }
 
@@ -567,8 +574,7 @@ static int rfdev_fpga_ops_config_complete(struct fpga_manager *mgr,
 	client = dev_get_drvdata(&mgr->dev);
 	rfdev  = i2c_get_clientdata(client);
 
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b011, 3);   // goto Run-Test
-
+	tap_advance(rfdev, JTAG_STATE_IDLE);
 	// Idle time
 	for (i = 0; i < 16; i++)
 		i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0x00, 0);
@@ -580,8 +586,7 @@ static int rfdev_fpga_ops_config_complete(struct fpga_manager *mgr,
 
 	get_status(rfdev, &status);
 
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0xff, 0);	      // goto Reset
-
+	tap_advance(rfdev, JTAG_STATE_TLRESET);
 	return 0;
 }
 
@@ -595,8 +600,6 @@ static enum fpga_mgr_states rfdev_fpga_ops_state(struct fpga_manager *mgr)
 
 	client = dev_get_drvdata(&mgr->dev);
 	rfdev  = i2c_get_clientdata(client);
-
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0x7f, 0);	      // goto Run-Test
 
 	get_status(rfdev, &status);
 	if (!test_bit(BUSY, &status) && test_bit(DONE, &status) &&
@@ -620,29 +623,20 @@ static int rf_jtag_xfer(struct rfdev_device *rfdev,
 {
 	int ret;
 
-	if (xfer->endstate != JTAG_STATE_IDLE) {
-		pr_err("xfer endstate: other than idle not implemented\n");
-		return -EINVAL;
-	}
-
 	if (xfer->direction == JTAG_WRITE_XFER) {
 		if (xfer->type == JTAG_SDR_XFER)
-			// goto Shift-DR
-			i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b001, 3);
+			tap_advance(rfdev, JTAG_STATE_SHIFTDR);
 		else if (xfer->type == JTAG_SIR_XFER)
-			// goto Shift-IR
-			i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);
+			tap_advance(rfdev, JTAG_STATE_SHIFTIR);
 		else
 			return -EINVAL;
 
 		ret = rf_tdi_out(rfdev, data, size, xfer->length);
 	} else if (xfer->direction == JTAG_READ_XFER) {
 		if (xfer->type == JTAG_SDR_XFER)
-			// goto Shift-DR
-			i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b001, 3);
+			tap_advance(rfdev, JTAG_STATE_SHIFTDR);
 		else if (xfer->type == JTAG_SIR_XFER)
-			// goto Shift-IR
-			i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0b0011, 4);
+			tap_advance(rfdev, JTAG_STATE_SHIFTIR);
 		else
 			return -EINVAL;
 
@@ -652,7 +646,7 @@ static int rf_jtag_xfer(struct rfdev_device *rfdev,
 		return -EINVAL;
 	}
 
-	i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0b011, 0);	// goto Run-Test
+	tap_advance(rfdev, xfer->endstate);
 	return ret;
 }
 
@@ -686,21 +680,25 @@ static long rfdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 	switch (cmd) {
 	case JTAG_GIOCENDSTATE:
+		err = put_user(rfdev->tap_state, (uint32_t __user *)arg);
 		break;
 	case JTAG_SIOCSTATE:
 		if (copy_from_user(&endstate, (const void __user *)arg,
 					sizeof(struct jtag_end_tap_state)))
 			return -EFAULT;
 
-		if (endstate.endstate == JTAG_STATE_IDLE &&
-		    endstate.reset == JTAG_FORCE_RESET) {
-			i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0x7f, 0);
-		} else if (endstate.endstate == JTAG_STATE_TLRESET) {
-			i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0xff, 0);
-		} else {
-			pr_err("set state: only reset and idle through reset are implemented");
+		if (endstate.endstate > JTAG_STATE_UPDATEIR)
 			return -EINVAL;
-		}
+
+		if (endstate.reset > JTAG_FORCE_RESET)
+			return -EINVAL;
+
+		if (endstate.reset == JTAG_FORCE_RESET)
+			err = tap_advance(rfdev, JTAG_STATE_TLRESET);
+
+		do {
+			err = tap_advance(rfdev, endstate.endstate);
+		} while (endstate.tck-- > 0);
 		break;
 	case JTAG_IOCXFER:
 		if (copy_from_user(&xfer, (const void __user *)arg,
@@ -805,6 +803,7 @@ static int rfdev_probe(struct i2c_client *client,
 
 	rfdev->client[0].client = client;
 	rfdev->num_clients = 1;
+	rfdev->tap_state = 0xff;	// unknown state
 
 	for (i = 1; i < PIC_NUM_ADDRS; i++) {
 		err = rfdev_make_dummy_client(rfdev, i);
