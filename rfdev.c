@@ -381,8 +381,9 @@ static void reset_fpga(struct rfdev_device *rfdev)
 		goto fail;
 
 	get_status(rfdev, &status);
-	if (!test_bit(DONE, &status))
-		goto fail;
+	// TODO: find a way to check if reset was successful
+	/*if (!test_bit(DONE, &status))*/
+		/*goto fail;*/
 
 	goto out;
 
