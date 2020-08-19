@@ -211,6 +211,7 @@ static int i2c_pic_write_block(struct rfdev_device *rfdev,
 
 static int tap_advance(struct rfdev_device *rfdev, enum jtag_endstate endstate)
 {
+	struct jtag_path path;
 	int err;
 
 	if (rfdev->tap_state > JTAG_STATE_UPDATEIR) {
@@ -220,13 +221,23 @@ static int tap_advance(struct rfdev_device *rfdev, enum jtag_endstate endstate)
 		rfdev->tap_state = JTAG_STATE_TLRESET;
 	}
 
-	err = i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN,
-			path_table[rfdev->tap_state][endstate].seq,
-			path_table[rfdev->tap_state][endstate].len);
+	path = path_table[rfdev->tap_state][endstate];
+	if (path.len == 8)
+		err = i2c_pic_write(rfdev, PIC_WR_TMS_OUT, path.seq, 0);
+	else
+		err = i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN,
+				path.seq, path.len);
 	if (err)
 		return err;
 	rfdev->tap_state = endstate;
 	return 0;
+}
+
+static int tap_advance_idle(struct rfdev_device *rfdev, int count)
+{
+	do {
+		tap_advance(rfdev, JTAG_STATE_IDLE);
+	} while (count-- > 0);
 }
 
 static int rf_cmd_in(struct rfdev_device *rfdev,
@@ -234,14 +245,19 @@ static int rf_cmd_in(struct rfdev_device *rfdev,
 		     const uint8_t *op, int num_op)
 {
 	tap_advance(rfdev, JTAG_STATE_SHIFTIR);
-	i2c_pic_write(rfdev, PIC_WR_TDI_OUT_CONT, cmd, 0);
+	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, cmd, 0);
+	rfdev->tap_state = JTAG_STATE_EXIT1IR;
 	pr_debug("%s: sent command 0x%02x", __func__, cmd);
-	if (!num_op || !op)
+
+	if (!num_op || !op) {
+		tap_advance_idle(rfdev, 4);
 		return 0;
+	}
 
 	tap_advance(rfdev, JTAG_STATE_SHIFTDR);
 	while (num_op-- > 0)
 		i2c_pic_write(rfdev, PIC_WR_TDI_OUT_CONT, op[num_op], 0);
+	tap_advance_idle(rfdev, 4);
 	return 0;
 }
 
@@ -250,9 +266,11 @@ static int rf_cmd_out(struct rfdev_device *rfdev,
 		      uint64_t *val, int num_bytes)
 {
 	tap_advance(rfdev, JTAG_STATE_SHIFTIR);
-	i2c_pic_write(rfdev, PIC_WR_TDI_OUT_CONT, cmd, 0);
-	tap_advance(rfdev, JTAG_STATE_SHIFTDR);
+	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, cmd, 0);
+	rfdev->tap_state = JTAG_STATE_EXIT1IR;
 	pr_debug("%s: sent command 0x%02x", __func__, cmd);
+
+	tap_advance(rfdev, JTAG_STATE_SHIFTDR);
 
 	*val = 0;
 	while (num_bytes-- > 0) {
@@ -262,6 +280,7 @@ static int rf_cmd_out(struct rfdev_device *rfdev,
 			return byte;
 		*val = (*val << 8) | byte;
 	}
+	tap_advance_idle(rfdev, 4);
 	return 0;
 }
 
@@ -537,7 +556,8 @@ static int rfdev_fpga_ops_config_init(struct fpga_manager *mgr,
 	get_status(rfdev, &status);
 
 	tap_advance(rfdev, JTAG_STATE_SHIFTIR);
-	i2c_pic_write(rfdev, PIC_WR_TDI_OUT_CONT, RF_LSC_BITSTREAM_BURST, 0);
+	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, RF_LSC_BITSTREAM_BURST, 0);
+	rfdev->tap_state = JTAG_STATE_EXIT1IR;
 	pr_debug("%s: sent command 0x%02x", __func__, RF_LSC_BITSTREAM_BURST);
 
 	tap_advance(rfdev, JTAG_STATE_SHIFTDR);
@@ -567,18 +587,13 @@ static int rfdev_fpga_ops_config_complete(struct fpga_manager *mgr,
 	struct i2c_client *client;
 	struct rfdev_device *rfdev;
 	unsigned long status;
-	int i;
 
 	pr_debug("%s: called\n", __func__);
 
 	client = dev_get_drvdata(&mgr->dev);
 	rfdev  = i2c_get_clientdata(client);
 
-	tap_advance(rfdev, JTAG_STATE_IDLE);
-	// Idle time
-	for (i = 0; i < 16; i++)
-		i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0x00, 0);
-
+	tap_advance_idle(rfdev, 100);
 	get_status(rfdev, &status);
 
 	rf_cmd_in(rfdev, RF_ISC_DISABLE, NULL, 0);
