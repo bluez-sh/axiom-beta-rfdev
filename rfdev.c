@@ -298,6 +298,9 @@ static int rf_tdo_in(struct rfdev_device *rfdev,
 {
 	int i, byte;
 
+	if (!data || !size)
+		return 0;
+
 	for (i = 0; i < size; i++) {
 		if (i == size - 1)
 			byte = i2c_pic_read(rfdev, PIC_RD_TDO_IN);
@@ -318,6 +321,9 @@ static int rf_tdi_out(struct rfdev_device *rfdev,
 	unsigned char rbuf[RF_MAX_TX_SIZE];
 	unsigned int c, i, idx, rem_bits;
 	int err;
+
+	if (!data || !size)
+		return 0;
 
 	rem_bits = BITS_PER_BYTE * size - num_bits;
 
@@ -723,9 +729,7 @@ static long rfdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		if (endstate.reset == JTAG_FORCE_RESET)
 			err = tap_advance(rfdev, JTAG_STATE_TLRESET);
 
-		do {
-			err = tap_advance(rfdev, endstate.endstate);
-		} while (endstate.tck-- > 0);
+		err = tap_advance(rfdev, endstate.endstate);
 		break;
 	case JTAG_IOCXFER:
 		if (copy_from_user(&xfer, (const void __user *)arg,
