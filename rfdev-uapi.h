@@ -9,6 +9,8 @@
 #ifndef RFDEV_UAPI_H
 #define RFDEV_UAPI_H
 
+#include <linux/types.h>
+
 #define JTAG_MAX_XFER_DATA_LEN 65535
 
 enum jtag_endstate {
@@ -47,18 +49,18 @@ enum jtag_xfer_direction {
 };
 
 struct jtag_end_tap_state {
-	uint8_t reset;
-	uint8_t endstate;
-	uint8_t tck;
+	__u8	reset;
+	__u8	endstate;
+	__u8	tck;
 };
 
 struct jtag_xfer {
-	uint8_t type;
-	uint8_t direction;
-	uint8_t endstate;
-	uint8_t padding;
-	uint32_t length;
-	uint64_t tdio;
+	__u8	type;
+	__u8	direction;
+	__u8	endstate;
+	__u8	padding;
+	__u32	length;
+	__u64	tdio;
 };
 
 /* ioctl interface */

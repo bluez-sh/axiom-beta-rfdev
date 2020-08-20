@@ -235,9 +235,12 @@ static int tap_advance(struct rfdev_device *rfdev, enum jtag_endstate endstate)
 
 static int tap_advance_idle(struct rfdev_device *rfdev, int count)
 {
+	int err;
+
 	do {
-		tap_advance(rfdev, JTAG_STATE_IDLE);
+		err = tap_advance(rfdev, JTAG_STATE_IDLE);
 	} while (count-- > 0);
+	return err;
 }
 
 static int rf_cmd_in(struct rfdev_device *rfdev,
@@ -296,7 +299,8 @@ static int rf_cmd_out(struct rfdev_device *rfdev,
 static int rf_tdo_in(struct rfdev_device *rfdev,
 		     uint8_t *data, size_t size)
 {
-	int i, byte;
+	int byte;
+	unsigned int i;
 
 	if (!data || !size)
 		return 0;
@@ -316,9 +320,9 @@ static int rf_tdo_in(struct rfdev_device *rfdev,
 
 static int rf_tdi_out(struct rfdev_device *rfdev,
 		      const uint8_t *data, size_t size,
-		      size_t num_bits)
+		      size_t num_bits, int rev)
 {
-	unsigned char rbuf[RF_MAX_TX_SIZE];
+	unsigned char buf[RF_MAX_TX_SIZE];
 	unsigned int c, i, idx, rem_bits;
 	int err;
 
@@ -331,24 +335,25 @@ static int rf_tdi_out(struct rfdev_device *rfdev,
 		c = min(RF_MAX_TX_SIZE, size);
 
 		for (idx = 0; idx < c; idx++)
-			rbuf[idx] = rev_byte(data[i + idx]);
+			buf[idx] = rev ? rev_byte(data[i + idx])
+				       : data[i + idx];
 
 		if (c == 1) {
 			/* handle the last byte */
 			if (rem_bits)
 				err = i2c_pic_write(rfdev, PIC_WR_TDI_OUT_LEN,
-						rbuf[0], rem_bits);
+						buf[0], rem_bits);
 			else
 				err = i2c_pic_write(rfdev, PIC_WR_TDI_OUT,
-						rbuf[0], 0);
+						buf[0], 0);
 		} else if (size <= RF_MAX_TX_SIZE) {
 			/* leave out the last byte for last transfer */
 			err = i2c_pic_write_block(rfdev, PIC_WR_TDI_OUT_CONT,
-					rbuf[0], c - 2, &rbuf[1]);
+					buf[0], c - 2, &buf[1]);
 			c--;
 		} else {
 			err = i2c_pic_write_block(rfdev, PIC_WR_TDI_OUT_CONT,
-					rbuf[0], c - 1, &rbuf[1]);
+					buf[0], c - 1, &buf[1]);
 		}
 		if (err)
 			return err;
@@ -596,7 +601,7 @@ static int rfdev_fpga_ops_config_write(struct fpga_manager *mgr,
 	rfdev  = i2c_get_clientdata(client);
 
 	calc_hash(buf, count, rfdev->digest);
-	return rf_tdi_out(rfdev, buf, count, BITS_PER_BYTE * count);
+	return rf_tdi_out(rfdev, buf, count, BITS_PER_BYTE * count, 1);
 }
 
 static int rfdev_fpga_ops_config_complete(struct fpga_manager *mgr,
@@ -664,7 +669,7 @@ static int rf_jtag_xfer(struct rfdev_device *rfdev,
 		else
 			return -EINVAL;
 
-		ret = rf_tdi_out(rfdev, data, size, xfer->length);
+		ret = rf_tdi_out(rfdev, data, size, xfer->length, 0);
 	} else if (xfer->direction == JTAG_READ_XFER) {
 		if (xfer->type == JTAG_SDR_XFER)
 			tap_advance(rfdev, JTAG_STATE_SHIFTDR);
