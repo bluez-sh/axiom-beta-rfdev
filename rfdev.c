@@ -255,8 +255,12 @@ static int rf_cmd_in(struct rfdev_device *rfdev,
 	}
 
 	tap_advance(rfdev, JTAG_STATE_SHIFTDR);
-	while (num_op-- > 0)
+	while (num_op-- > 1)
 		i2c_pic_write(rfdev, PIC_WR_TDI_OUT_CONT, op[num_op], 0);
+
+	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, op[0], 0);
+	rfdev->tap_state = JTAG_STATE_EXIT1IR;
+
 	tap_advance_idle(rfdev, 4);
 	return 0;
 }
@@ -274,12 +278,17 @@ static int rf_cmd_out(struct rfdev_device *rfdev,
 
 	*val = 0;
 	while (num_bytes-- > 0) {
-		int byte = i2c_pic_read(rfdev, PIC_RD_TDO_IN_CONT);
+		int byte;
 
+		if (!num_bytes)
+			byte = i2c_pic_read(rfdev, PIC_RD_TDO_IN);
+		else
+			byte = i2c_pic_read(rfdev, PIC_RD_TDO_IN_CONT);
 		if (byte < 0)
 			return byte;
 		*val = (*val << 8) | byte;
 	}
+	rfdev->tap_state = JTAG_STATE_EXIT1IR;
 	tap_advance_idle(rfdev, 4);
 	return 0;
 }
@@ -290,11 +299,15 @@ static int rf_tdo_in(struct rfdev_device *rfdev,
 	int i, byte;
 
 	for (i = 0; i < size; i++) {
-		byte = i2c_pic_read(rfdev, PIC_RD_TDO_IN_CONT);
+		if (i == size - 1)
+			byte = i2c_pic_read(rfdev, PIC_RD_TDO_IN);
+		else
+			byte = i2c_pic_read(rfdev, PIC_RD_TDO_IN_CONT);
 		if (byte < 0)
 			return byte;
 		data[i] = byte & 0xff;
 	}
+	rfdev->tap_state = JTAG_STATE_EXIT1IR;
 	return 0;
 }
 
@@ -317,17 +330,14 @@ static int rf_tdi_out(struct rfdev_device *rfdev,
 		if (c == 1) {
 			/* handle the last byte */
 			if (rem_bits)
-				err = i2c_pic_write(rfdev,
-						PIC_WR_TDI_OUT_LEN_CONT,
+				err = i2c_pic_write(rfdev, PIC_WR_TDI_OUT_LEN,
 						rbuf[0], rem_bits);
 			else
-				err = i2c_pic_write(rfdev,
-						PIC_WR_TDI_OUT_CONT,
+				err = i2c_pic_write(rfdev, PIC_WR_TDI_OUT,
 						rbuf[0], 0);
 		} else if (size <= RF_MAX_TX_SIZE) {
 			/* leave out the last byte for last transfer */
-			err = i2c_pic_write_block(rfdev,
-					PIC_WR_TDI_OUT_CONT,
+			err = i2c_pic_write_block(rfdev, PIC_WR_TDI_OUT_CONT,
 					rbuf[0], c - 2, &rbuf[1]);
 			c--;
 		} else {
@@ -337,6 +347,7 @@ static int rf_tdi_out(struct rfdev_device *rfdev,
 		if (err)
 			return err;
 	}
+	rfdev->tap_state = JTAG_STATE_EXIT1IR;
 	return 0;
 }
 
