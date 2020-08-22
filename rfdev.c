@@ -233,13 +233,17 @@ static int tap_advance(struct rfdev_device *rfdev, enum jtag_endstate endstate)
 	return 0;
 }
 
-static int tap_advance_idle(struct rfdev_device *rfdev, int count)
+static int tap_advance_idle(struct rfdev_device *rfdev, unsigned int count)
 {
+	unsigned int i;
 	int err;
 
-	do {
-		err = tap_advance(rfdev, JTAG_STATE_IDLE);
-	} while (count-- > 0);
+	err = tap_advance(rfdev, JTAG_STATE_IDLE);
+
+	for (i = 0; i < count / 8; i++)
+		err = i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0, 0);
+	if (count % 8)
+		err = i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0, count % 8);
 	return err;
 }
 
@@ -734,7 +738,9 @@ static long rfdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		if (endstate.reset == JTAG_FORCE_RESET)
 			err = tap_advance(rfdev, JTAG_STATE_TLRESET);
 
-		err = tap_advance(rfdev, endstate.endstate);
+		do {
+			err = tap_advance(rfdev, endstate.endstate);
+		} while (endstate.tck--);
 		break;
 	case JTAG_IOCXFER:
 		if (copy_from_user(&xfer, (const void __user *)arg,
