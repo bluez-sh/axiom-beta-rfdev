@@ -665,30 +665,27 @@ static int rf_jtag_xfer(struct rfdev_device *rfdev,
 {
 	int ret;
 
-	if (xfer->direction == JTAG_WRITE_XFER) {
-		if (xfer->type == JTAG_SDR_XFER)
+	if (xfer->type == JTAG_SDR_XFER) {
+		if (rfdev->tap_state != JTAG_STATE_SHIFTDR)
 			tap_advance(rfdev, JTAG_STATE_SHIFTDR);
-		else if (xfer->type == JTAG_SIR_XFER)
+	} else if (xfer->type == JTAG_SIR_XFER) {
+		if (rfdev->tap_state != JTAG_STATE_SHIFTIR)
 			tap_advance(rfdev, JTAG_STATE_SHIFTIR);
-		else
-			return -EINVAL;
+	} else {
+		return -EINVAL;
+	}
 
+	if (xfer->direction == JTAG_WRITE_XFER) {
 		ret = rf_tdi_out(rfdev, data, size, xfer->length, 0);
 	} else if (xfer->direction == JTAG_READ_XFER) {
-		if (xfer->type == JTAG_SDR_XFER)
-			tap_advance(rfdev, JTAG_STATE_SHIFTDR);
-		else if (xfer->type == JTAG_SIR_XFER)
-			tap_advance(rfdev, JTAG_STATE_SHIFTIR);
-		else
-			return -EINVAL;
-
 		ret = rf_tdo_in(rfdev, data, size);
 	} else {
 		pr_err("xfer direction: both read-write not implemented\n");
 		return -EINVAL;
 	}
 
-	tap_advance(rfdev, xfer->endstate);
+	if (rfdev->tap_state != xfer->endstate)
+		tap_advance(rfdev, xfer->endstate);
 	return ret;
 }
 
