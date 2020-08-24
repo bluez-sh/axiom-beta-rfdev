@@ -328,13 +328,13 @@ static int rf_tdi_out(struct rfdev_device *rfdev,
 		      size_t num_bits, int rev, int cont)
 {
 	unsigned char buf[RF_MAX_TX_SIZE], cmd;
-	unsigned int c, i, idx, rem_bits;
+	unsigned int c, i, idx, rem;
 	int err;
 
 	if (!data || !size)
 		return 0;
 
-	rem_bits = BITS_PER_BYTE * size - num_bits;
+	rem = BITS_PER_BYTE * size - num_bits;
 
 	for (i = 0; size > 0; size -= c, i += c) {
 		c = min(RF_MAX_TX_SIZE, size);
@@ -345,11 +345,10 @@ static int rf_tdi_out(struct rfdev_device *rfdev,
 
 		if (c == 1) {
 			/* handle the last byte */
-			if (rem_bits) {
+			if (rem) {
 				cmd = cont ? PIC_WR_TDI_OUT_LEN_CONT
 					   : PIC_WR_TDI_OUT_LEN;
-				err = i2c_pic_write(rfdev, cmd,
-						buf[0], rem_bits);
+				err = i2c_pic_write(rfdev, cmd, buf[0], rem);
 			} else {
 				cmd = cont ? PIC_WR_TDI_OUT_CONT
 					   : PIC_WR_TDI_OUT;
@@ -366,6 +365,51 @@ static int rf_tdi_out(struct rfdev_device *rfdev,
 		}
 		if (err)
 			return err;
+	}
+	if (!cont)
+		rfdev->tap_state = JTAG_STATE_EXIT1IR;
+	return 0;
+}
+
+static int rf_tdi_tdo(struct rfdev_device *rfdev,
+		      uint8_t *data, size_t size,
+		      size_t num_bits, int cont)
+{
+	unsigned char cmd;
+	unsigned int i, rem;
+	int ret;
+
+	if (!data || !size)
+		return 0;
+
+	rem = BITS_PER_BYTE * size - num_bits;
+
+	for (i = 0; i < size; i++) {
+		if (i == size - 1) {
+			if (rem) {
+				cmd = cont ? PIC_WR_TDI_TDO_LEN_CONT
+					   : PIC_WR_TDI_TDO_LEN;
+				ret = i2c_pic_write(rfdev, cmd, data[i], rem);
+			} else {
+				cmd = cont ? PIC_WR_TDI_TDO_CONT
+					   : PIC_WR_TDI_TDO;
+				ret = i2c_pic_write(rfdev, cmd, data[i], 0);
+			}
+		} else {
+			ret = i2c_pic_write(rfdev, PIC_WR_TDI_TDO_CONT,
+					data[i], 0);
+		}
+		if (ret < 0)
+			return ret;
+
+		ret = i2c_pic_read(rfdev, PIC_RD_V);	// shifted out byte
+		if (ret < 0)
+			return ret;
+
+		if (i == size - 1 && rem)
+			data[i] = (ret << (BITS_PER_BYTE - rem)) & 0xff;
+		else
+			data[i] = ret & 0xff;
 	}
 	if (!cont)
 		rfdev->tap_state = JTAG_STATE_EXIT1IR;
@@ -683,14 +727,14 @@ static int rf_jtag_xfer(struct rfdev_device *rfdev,
 
 	cont = (rfdev->tap_state == xfer->endstate);
 
-	if (xfer->direction == JTAG_WRITE_XFER) {
+	if (xfer->direction == JTAG_WRITE_XFER)
 		ret = rf_tdi_out(rfdev, data, size, xfer->length, 0, cont);
-	} else if (xfer->direction == JTAG_READ_XFER) {
+	else if (xfer->direction == JTAG_READ_XFER)
 		ret = rf_tdo_in(rfdev, data, size, cont);
-	} else {
-		pr_err("xfer direction: both read-write not implemented\n");
+	else if (xfer->direction == JTAG_READ_WRITE_XFER)
+		ret = rf_tdi_tdo(rfdev, data, size, xfer->length, cont);
+	else
 		return -EINVAL;
-	}
 
 	if (rfdev->tap_state != xfer->endstate)
 		tap_advance(rfdev, xfer->endstate);
