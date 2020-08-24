@@ -3,9 +3,9 @@ A Linux Kernel Driver for programming/debugging the Lattice MachXO2 FPGAs (used 
 The driver integrates with Linux FPGA Manager Framework to allow easy programming of MachXO2's SRAM.<br><br>
 Here is an overview of the setup:<br>
 Zynq SoC <--- *I2C* ---> PIC16 MCU <--- *JTAG* ---> MachXO2 FPGA<br><br>
-Linux runs on hardened ARM cores in Zynq SoC, which is where the driver comes in. PIC16 responds to a range of I2C commands and translates them into JTAG commands for MachXO2. 
+Linux runs on hardened ARM cores in Zynq SoC, which is where the driver comes in. PIC16 responds to a range of I2C commands and translates them into JTAG commands for MachXO2.
 
-## Currently supported features
+## Features
 - Upload a compressed bitstream (produced by Lattice Diamod tools) into MachXO2's SRAM<br>
 <code># echo bitstream.bit > /sys/class/fpga_manager/<i>fpga#</i>/firmware </code> where,<br>
   - <code><i>fpga#</i></code> could be <i>fpga0</i>, <i>fpga1</i> etc.
@@ -23,11 +23,39 @@ Linux runs on hardened ARM cores in Zynq SoC, which is where the driver comes in
 - sysfs entry to read out usercode<br>
 <code>$ cat /sys/class/fpga_manager/<i>fpga#</i>/usercode</code>
 - RFWest and RFEast can be used seperately for AXIOM Betas with both old and new power board versions
+- A User API based on ioctl is added which exposes a JTAG interface from the FPGAs
+  - Can be used by an application like OpenOCD to do SVF replays for programming or debugging<br>
+  - The two devices can be accessed as: <code>/dev/rfw</code> and <code>/dev/rfe</code>
 
-## Requires
+Following ioctl commands are defined:<br>
+```
+JTAG_SIOCSTATE    -> transit to given tap state
+JTAG_GIOCENDSTATE -> get current tap state
+JTAG_IOCXFER      -> send SIR/SDR transaction
+```
+
+## Requirements
 Appropriate devicetree overlay must be loaded in AXIOM Beta:<br>
 - <code>dt-overlay/pic_rf_mux_overlay.dts</code> for old power board (the one with PCA9540 mux)<br>
 - <code>dt-overlay/pic_rf_switch_overlay.dts</code> for new power board (the one with TS3A4751 analog switch)
+
+Run the following scripts before loading the driver (in firmware 2.0):
+```
+# the scripts directory in this repo
+cd scripts
+
+# initialize power and load the icsp bitstream into microzed's fpga
+sudo ./opt/axiom-firmware/software/scripts/axiom_prep_iscp.sh
+
+# pull up the #MCLR lines of both the PIC16s
+sudo python pull_up_reset.py
+
+# load the appropriate device tree overlay
+sudo ./load_overlay.sh ../dt-overlays/pic_rf_switch_overlay.dts
+
+# configure the jtag out ports of both the PIC16s
+sudo python jtag_on.py
+```
 
 ## Build Instructions
 1. <code>git clone --recursive https://github.com/apertus-open-source-cinema/axiom-firmware</code>
