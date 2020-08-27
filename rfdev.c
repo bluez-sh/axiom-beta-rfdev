@@ -402,7 +402,8 @@ static int rf_tdi_tdo(struct rfdev_device *rfdev,
 		if (ret < 0)
 			return ret;
 
-		ret = i2c_pic_read(rfdev, PIC_RD_V);	// shifted out byte
+		/* shifted out byte */
+		ret = i2c_pic_read(rfdev, PIC_RD_TDI_TDO_IN_VAL);
 		if (ret < 0)
 			return ret;
 

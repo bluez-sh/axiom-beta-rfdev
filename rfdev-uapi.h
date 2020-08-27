@@ -64,9 +64,9 @@ struct jtag_xfer {
 };
 
 /* ioctl interface */
-#define __RFDEV_IOC_MAGIC '['
-#define JTAG_SIOCSTATE	_IOW(__RFDEV_IOC_MAGIC, 0, struct jtag_end_tap_state)
-#define JTAG_GIOCENDSTATE _IOR(__RFDEV_IOC_MAGIC, 1, enum jtag_endstate)
-#define JTAG_IOCXFER	_IOWR(__RFDEV_IOC_MAGIC, 2, struct jtag_xfer)
+#define RFDEV_IOC_MAGIC '['
+#define JTAG_SIOCSTATE	_IOW(RFDEV_IOC_MAGIC, 0, struct jtag_end_tap_state)
+#define JTAG_GIOCENDSTATE _IOR(RFDEV_IOC_MAGIC, 1, enum jtag_endstate)
+#define JTAG_IOCXFER	_IOWR(RFDEV_IOC_MAGIC, 2, struct jtag_xfer)
 
 #endif

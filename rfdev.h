@@ -27,12 +27,12 @@ enum i2c_client_write_opr {
 
 enum i2c_client_read_opr {
 	PIC_RD_BUF_DATA = 0,
-	PIC_RD_V = 5,
+	PIC_RD_TDI_TDO_IN_VAL = 5,
 	PIC_RD_TDO_IN,
 	PIC_RD_TDO_IN_LEN,
 	PIC_RD_TDO_IN_CONT = 10,
 	PIC_RD_TDO_IN_LEN_CONT,
-	PIC_RD_F = 16,
+	PIC_RD_FEAT = 16,
 };
 
 enum rf_jtag_cmd {
