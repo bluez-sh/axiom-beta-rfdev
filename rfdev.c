@@ -316,7 +316,7 @@ static int rf_tdo_in(struct rfdev_device *rfdev,
 			byte = i2c_pic_read(rfdev, PIC_RD_TDO_IN_CONT);
 		if (byte < 0)
 			return byte;
-		data[i] = byte & 0xff;
+		data[i] = rev_byte(byte & 0xff);
 	}
 	if (!cont)
 		rfdev->tap_state = JTAG_STATE_EXIT1IR;
@@ -407,10 +407,7 @@ static int rf_tdi_tdo(struct rfdev_device *rfdev,
 		if (ret < 0)
 			return ret;
 
-		if (i == size - 1 && rem)
-			data[i] = (ret << (BITS_PER_BYTE - rem)) & 0xff;
-		else
-			data[i] = ret & 0xff;
+		data[i] = rev_byte(ret & 0xff);
 	}
 	if (!cont)
 		rfdev->tap_state = JTAG_STATE_EXIT1IR;
