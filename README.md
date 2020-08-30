@@ -36,8 +36,9 @@ JTAG_IOCXFER      -> send SIR/SDR transaction
 
 ## Requirements
 Appropriate devicetree overlay must be loaded in AXIOM Beta:<br>
-- <code>dt-overlay/pic_rf_mux_overlay.dts</code> for old power board (the one with PCA9540 mux)<br>
-- <code>dt-overlay/pic_rf_switch_overlay.dts</code> for new power board (the one with TS3A4751 analog switch)
+- <code>dt-overlay/pic_rf_mux_overlay.dts</code> for power board with PCA9540 mux<br>
+- <code>dt-overlay/pic_rf_mux_rst_overlay.dts</code> for power board with PCA9543 mux<br>
+- <code>dt-overlay/pic_rf_switch_overlay.dts</code> for power board with TS3A4751 analog switch
 
 Run the following scripts before loading the driver (in firmware 2.0):
 ```
