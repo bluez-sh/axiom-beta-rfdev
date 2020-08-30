@@ -1,0 +1,38 @@
+/dts-v1/;
+/plugin/;
+	    
+/ {
+	fragment@0 {
+		target = <&i2c1>;
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			mux@30 {
+				compatible = "nxp,pca9543";
+				reg = <0x30>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				i2c@0 {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <0>;
+					pic@40 {
+						compatible = "apertus,pic-rfw-interface";
+						reg = <0x40>;
+					};
+				};
+
+				i2c@1 {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <1>;
+					pic@40 {
+						compatible = "apertus,pic-rfe-interface";
+						reg = <0x40>;
+					};
+				};
+			};
+		};
+	};
+};
