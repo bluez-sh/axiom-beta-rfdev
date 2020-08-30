@@ -1,4 +1,6 @@
 # axiom-beta-rfdev
+> Note: This repository contains all the source code produced by me under GSoC 2020 with apertus° Association. For detailed project report, please read [GSoC2020_final_report.pdf](https://github.com/Swaraj1998/axiom-beta-rfdev/blob/master/GSoC2020_final_report.pdf) in this repository.<br>
+
 A Linux Kernel Driver for programming/debugging the Lattice MachXO2 FPGAs (used as routing fabrics) in AXIOM Beta Main Board.
 The driver integrates with Linux FPGA Manager Framework to allow easy programming of MachXO2's SRAM.<br><br>
 Here is an overview of the setup:<br>
