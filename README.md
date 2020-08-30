@@ -58,6 +58,24 @@ sudo ./load_overlay.sh ../dt-overlays/pic_rf_switch_overlay.dts
 sudo python jtag_on.py
 ```
 
+## OpenOCD Usage
+The patch for OpenOCD can be found inside <code>openocd-patch</code> directory in this repo.<br>
+After applying the patch configure OpenOCD with <code>--enable-rfdev-jtag=yes</code> option and build.<br>
+A sample .cfg file for OpenOCD then will look like this:
+```
+# select the driver
+adapter driver rfdev_jtag
+
+# specify the device file
+rfdev_set_device /dev/rfw
+
+# speed must be specified but is not used
+adapter speed 1
+```
+
+Then run with something like:<br>
+<code>./openocd -f openocd.cfg -c init -c "svf count.svf"</code>
+
 ## Build Instructions
 1. <code>git clone --recursive https://github.com/apertus-open-source-cinema/axiom-firmware</code>
 2. <code>cd axiom-firmware</code>
