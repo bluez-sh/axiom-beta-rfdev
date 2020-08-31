@@ -184,12 +184,12 @@ static int i2c_pic_write(struct rfdev_device *rfdev,
 
 static int i2c_pic_write_block(struct rfdev_device *rfdev,
 			       enum i2c_client_write_opr opr,
-			       uint8_t cmd, uint8_t len,
+			       uint8_t cmd, int len,
 			       const uint8_t *data)
 {
 	char data_str[RF_MAX_TX_SIZE * 3 + 2];
-	unsigned int i, ptr = 0;
-	int ret;
+	unsigned int ptr = 0;
+	int ret, i;
 
 	for (i = 0; i < len; i++)
 		ptr += scnprintf(data_str + ptr,
@@ -201,7 +201,7 @@ static int i2c_pic_write_block(struct rfdev_device *rfdev,
 
 	pr_debug("smbus_write %02X <- %02X %s\n",
 			get_i2c_client(rfdev, opr)->addr, cmd, data_str);
-	if (!len)
+	if (len <= 0)
 		ret = i2c_smbus_write_byte(get_i2c_client(rfdev, opr), cmd);
 	else
 		ret = i2c_smbus_write_i2c_block_data(
@@ -266,7 +266,7 @@ static int rf_cmd_in(struct rfdev_device *rfdev,
 		i2c_pic_write(rfdev, PIC_WR_TDI_OUT_CONT, op[num_op], 0);
 
 	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, op[0], 0);
-	rfdev->tap_state = JTAG_STATE_EXIT1IR;
+	rfdev->tap_state = JTAG_STATE_EXIT1DR;
 
 	tap_advance_idle(rfdev, 4);
 	return 0;
@@ -295,16 +295,18 @@ static int rf_cmd_out(struct rfdev_device *rfdev,
 			return byte;
 		*val = (*val << 8) | byte;
 	}
-	rfdev->tap_state = JTAG_STATE_EXIT1IR;
+	rfdev->tap_state = JTAG_STATE_EXIT1DR;
 	tap_advance_idle(rfdev, 4);
 	return 0;
 }
 
 static int rf_tdo_in(struct rfdev_device *rfdev,
-		     uint8_t *data, size_t size, int cont)
+		     uint8_t *data, int num_bits, int cont)
 {
 	int byte;
-	unsigned int i;
+	unsigned int i, size;
+
+	size = DIV_ROUND_UP(num_bits, BITS_PER_BYTE);
 
 	if (!data || !size)
 		return 0;
@@ -319,85 +321,77 @@ static int rf_tdo_in(struct rfdev_device *rfdev,
 		data[i] = rev_byte(byte & 0xff);
 	}
 	if (!cont)
-		rfdev->tap_state = JTAG_STATE_EXIT1IR;
+		if (rfdev->tap_state == JTAG_STATE_SHIFTDR)
+			rfdev->tap_state = JTAG_STATE_EXIT1DR;
+		else
+			rfdev->tap_state = JTAG_STATE_EXIT1IR;
 	return 0;
 }
 
-static int rf_tdi_out(struct rfdev_device *rfdev,
-		      const uint8_t *data, size_t size,
-		      size_t num_bits, int rev, int cont)
+static int rf_tdi_out(struct rfdev_device *rfdev, const uint8_t *data,
+		      int num_bits, int cont)
 {
-	unsigned char buf[RF_MAX_TX_SIZE], cmd;
-	unsigned int c, i, idx, rem;
+	unsigned int b;
+	uint8_t cmd;
 	int err;
 
-	if (!data || !size)
+	if (!data || !num_bits)
 		return 0;
 
-	rem = BITS_PER_BYTE * size - num_bits;
-
-	for (i = 0; size > 0; size -= c, i += c) {
-		c = min(RF_MAX_TX_SIZE, size);
-
-		for (idx = 0; idx < c; idx++)
-			buf[idx] = rev ? rev_byte(data[i + idx])
-				       : data[i + idx];
-
-		if (c == 1) {
-			/* handle the last byte */
-			if (rem) {
-				cmd = cont ? PIC_WR_TDI_OUT_LEN_CONT
-					   : PIC_WR_TDI_OUT_LEN;
-				err = i2c_pic_write(rfdev, cmd, buf[0], rem);
-			} else {
-				cmd = cont ? PIC_WR_TDI_OUT_CONT
-					   : PIC_WR_TDI_OUT;
-				err = i2c_pic_write(rfdev, cmd, buf[0], 0);
-			}
-		} else if (size <= RF_MAX_TX_SIZE) {
-			/* leave out the last byte for last transfer */
+	while (num_bits > 0) {
+		if (num_bits > 2 * BITS_PER_BYTE) {
+			b = min(RF_MAX_TX_SIZE, (num_bits - 1) / BITS_PER_BYTE);
 			err = i2c_pic_write_block(rfdev, PIC_WR_TDI_OUT_CONT,
-					buf[0], c - 2, &buf[1]);
-			c--;
+					*data, b - 1, data + 1);
+			num_bits -= b * BITS_PER_BYTE;
+			data += b;
+		} else if (num_bits >= BITS_PER_BYTE) {
+			cmd = (num_bits == BITS_PER_BYTE && !cont) ?
+				PIC_WR_TDI_OUT : PIC_WR_TDI_OUT_CONT;
+			err = i2c_pic_write(rfdev, cmd, *data, 0);
+			num_bits -= BITS_PER_BYTE;
+			data++;
 		} else {
-			err = i2c_pic_write_block(rfdev, PIC_WR_TDI_OUT_CONT,
-					buf[0], c - 1, &buf[1]);
+			cmd = cont ? PIC_WR_TDI_OUT_LEN_CONT
+				   : PIC_WR_TDI_OUT_LEN;
+			err = i2c_pic_write(rfdev, cmd, *data, num_bits);
+			num_bits = 0;
 		}
 		if (err)
 			return err;
 	}
 	if (!cont)
-		rfdev->tap_state = JTAG_STATE_EXIT1IR;
+		if (rfdev->tap_state == JTAG_STATE_SHIFTDR)
+			rfdev->tap_state = JTAG_STATE_EXIT1DR;
+		else
+			rfdev->tap_state = JTAG_STATE_EXIT1IR;
 	return 0;
 }
 
 static int rf_tdi_tdo(struct rfdev_device *rfdev,
-		      uint8_t *data, size_t size,
-		      size_t num_bits, int cont)
+		      uint8_t *data, int num_bits, int cont)
 {
-	unsigned char cmd;
-	unsigned int i, rem;
+	uint8_t cmd;
 	int ret;
 
-	if (!data || !size)
+	if (!data || !num_bits)
 		return 0;
 
-	rem = BITS_PER_BYTE * size - num_bits;
-
-	for (i = 0; i < size; i++) {
-		if (i == size - 1) {
-			if (rem) {
-				cmd = cont ? PIC_WR_TDI_TDO_LEN_CONT
-					   : PIC_WR_TDI_TDO_LEN;
-				ret = i2c_pic_write(rfdev, cmd, data[i], rem);
-			} else {
-				cmd = cont ? PIC_WR_TDI_TDO_CONT
-					   : PIC_WR_TDI_TDO;
-				ret = i2c_pic_write(rfdev, cmd, data[i], 0);
-			}
-		} else {
+	while (num_bits > 0) {
+		if (num_bits > BITS_PER_BYTE) {
 			ret = i2c_pic_write(rfdev, PIC_WR_TDI_TDO_CONT,
-					data[i], 0);
+					*data, 0);
+			num_bits -= BITS_PER_BYTE;
+		} else if (num_bits == BITS_PER_BYTE) {
+			cmd = cont ? PIC_WR_TDI_TDO_CONT
+				   : PIC_WR_TDI_TDO;
+			ret = i2c_pic_write(rfdev, cmd, *data, 0);
+			num_bits = 0;
+		} else {
+			cmd = cont ? PIC_WR_TDI_TDO_LEN_CONT
+				   : PIC_WR_TDI_TDO_LEN;
+			ret = i2c_pic_write(rfdev, cmd, *data, num_bits);
+			num_bits = 0;
 		}
 		if (ret < 0)
 			return ret;
@@ -407,10 +401,14 @@ static int rf_tdi_tdo(struct rfdev_device *rfdev,
 		if (ret < 0)
 			return ret;
 
-		data[i] = rev_byte(ret & 0xff);
+		*data = rev_byte(ret & 0xff);
+		data++;
 	}
 	if (!cont)
-		rfdev->tap_state = JTAG_STATE_EXIT1IR;
+		if (rfdev->tap_state == JTAG_STATE_SHIFTDR)
+			rfdev->tap_state = JTAG_STATE_EXIT1DR;
+		else
+			rfdev->tap_state = JTAG_STATE_EXIT1IR;
 	return 0;
 }
 
@@ -648,12 +646,34 @@ static int rfdev_fpga_ops_config_write(struct fpga_manager *mgr,
 {
 	struct i2c_client *client;
 	struct rfdev_device *rfdev;
+	unsigned char rbuf[33];
+	unsigned int i, idx, c;
+	int err;
 
 	client = dev_get_drvdata(&mgr->dev);
 	rfdev  = i2c_get_clientdata(client);
 
 	calc_hash(buf, count, rfdev->digest);
-	return rf_tdi_out(rfdev, buf, count, BITS_PER_BYTE * count, 1, 0);
+
+	for (i = 0; i < count; i += c) {
+		c = min(33, count - i);
+
+		for (idx = 0; idx < c; idx++)
+			rbuf[idx] = rev_byte(buf[i + idx]);
+
+		if (c == 1) {
+			err = i2c_pic_write(rfdev, PIC_WR_TDI_OUT, rbuf[0], 0);
+		} else {
+			/* always send one less than maximum here */
+			c--;
+			err = i2c_pic_write_block(rfdev, PIC_WR_TDI_OUT_CONT,
+					rbuf[0], c - 1, &rbuf[1]);
+		}
+		if (err)
+			return err;
+	}
+	rfdev->tap_state = JTAG_STATE_EXIT1DR;
+	return 0;
 }
 
 static int rfdev_fpga_ops_config_complete(struct fpga_manager *mgr,
@@ -708,8 +728,7 @@ static const struct fpga_manager_ops rfdev_fpga_ops = {
 };
 
 static int rf_jtag_xfer(struct rfdev_device *rfdev,
-			struct jtag_xfer *xfer,
-			uint8_t *data, size_t size)
+			struct jtag_xfer *xfer, uint8_t *data)
 {
 	int ret, cont;
 
@@ -726,11 +745,11 @@ static int rf_jtag_xfer(struct rfdev_device *rfdev,
 	cont = (rfdev->tap_state == xfer->endstate);
 
 	if (xfer->direction == JTAG_WRITE_XFER)
-		ret = rf_tdi_out(rfdev, data, size, xfer->length, 0, cont);
+		ret = rf_tdi_out(rfdev, data, xfer->length, cont);
 	else if (xfer->direction == JTAG_READ_XFER)
-		ret = rf_tdo_in(rfdev, data, size, cont);
+		ret = rf_tdo_in(rfdev, data, xfer->length, cont);
 	else if (xfer->direction == JTAG_READ_WRITE_XFER)
-		ret = rf_tdi_tdo(rfdev, data, size, xfer->length, cont);
+		ret = rf_tdi_tdo(rfdev, data, xfer->length, cont);
 	else
 		return -EINVAL;
 
@@ -808,7 +827,7 @@ static long rfdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		if (IS_ERR(xfer_data))
 			return -EFAULT;
 
-		err = rf_jtag_xfer(rfdev, &xfer, xfer_data, data_size);
+		err = rf_jtag_xfer(rfdev, &xfer, xfer_data);
 		if (err) {
 			kfree(xfer_data);
 			return err;
