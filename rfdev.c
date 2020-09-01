@@ -233,17 +233,40 @@ static int tap_advance(struct rfdev_device *rfdev, enum jtag_endstate endstate)
 	return 0;
 }
 
-static int tap_advance_idle(struct rfdev_device *rfdev, unsigned int count)
+static int tap_stableclocks(struct rfdev_device *rfdev,
+			    enum jtag_endstate endstate,
+			    unsigned int cnt)
 {
-	unsigned int i;
-	int err;
+	int err = 0;
 
-	err = tap_advance(rfdev, JTAG_STATE_IDLE);
+	switch (endstate) {
+	case JTAG_STATE_TLRESET:
+	case JTAG_STATE_IDLE:
+	case JTAG_STATE_SHIFTIR:
+	case JTAG_STATE_SHIFTDR:
+	case JTAG_STATE_PAUSEIR:
+	case JTAG_STATE_PAUSEDR:
+		break;
+	default:
+		pr_err("%s: unstable state %d\n", __func__, endstate);
+		return -EINVAL;
+	}
 
-	for (i = 0; i < count / 8; i++)
-		err = i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0, 0);
-	if (count % 8)
-		err = i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0, count % 8);
+	if (rfdev->tap_state != endstate)
+		err = tap_advance(rfdev, endstate);
+	if (err)
+		return err;
+
+	if (endstate == JTAG_STATE_TLRESET) {
+		unsigned int i;
+		for (i = 0; i < cnt / 8; i++)
+			err = i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0xff, 0);
+		if (cnt % 8)
+			err = i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN,
+					0xff, cnt % 8);
+	} else {
+		err = i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0, cnt);
+	}
 	return err;
 }
 
@@ -257,7 +280,7 @@ static int rf_cmd_in(struct rfdev_device *rfdev,
 	pr_debug("%s: sent command 0x%02x", __func__, cmd);
 
 	if (!num_op || !op) {
-		tap_advance_idle(rfdev, 4);
+		tap_stableclocks(rfdev, JTAG_STATE_IDLE, 4);
 		return 0;
 	}
 
@@ -268,7 +291,7 @@ static int rf_cmd_in(struct rfdev_device *rfdev,
 	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, op[0], 0);
 	rfdev->tap_state = JTAG_STATE_EXIT1DR;
 
-	tap_advance_idle(rfdev, 4);
+	tap_stableclocks(rfdev, JTAG_STATE_IDLE, 4);
 	return 0;
 }
 
@@ -296,7 +319,7 @@ static int rf_cmd_out(struct rfdev_device *rfdev,
 		*val = (*val << 8) | byte;
 	}
 	rfdev->tap_state = JTAG_STATE_EXIT1DR;
-	tap_advance_idle(rfdev, 4);
+	tap_stableclocks(rfdev, JTAG_STATE_IDLE, 4);
 	return 0;
 }
 
@@ -688,7 +711,7 @@ static int rfdev_fpga_ops_config_complete(struct fpga_manager *mgr,
 	client = dev_get_drvdata(&mgr->dev);
 	rfdev  = i2c_get_clientdata(client);
 
-	tap_advance_idle(rfdev, 100);
+	tap_stableclocks(rfdev, JTAG_STATE_IDLE, 100);
 	get_status(rfdev, &status);
 
 	rf_cmd_in(rfdev, RF_ISC_DISABLE, NULL, 0);
@@ -804,9 +827,10 @@ static long rfdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		if (endstate.reset == JTAG_FORCE_RESET)
 			err = tap_advance(rfdev, JTAG_STATE_TLRESET);
 
-		do {
-			err = tap_advance(rfdev, endstate.endstate);
-		} while (endstate.tck--);
+		err = tap_advance(rfdev, endstate.endstate);
+		if (endstate.tck)
+			err = tap_stableclocks(rfdev,
+					endstate.endstate, endstate.tck);
 		break;
 	case JTAG_IOCXFER:
 		if (copy_from_user(&xfer, (const void __user *)arg,
