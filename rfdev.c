@@ -237,15 +237,20 @@ static int tap_stableclocks(struct rfdev_device *rfdev,
 			    enum jtag_endstate endstate,
 			    unsigned int cnt)
 {
+	unsigned int i;
+	uint8_t byte;
 	int err = 0;
 
 	switch (endstate) {
 	case JTAG_STATE_TLRESET:
+		byte = 0xff;
+		break;
 	case JTAG_STATE_IDLE:
 	case JTAG_STATE_SHIFTIR:
 	case JTAG_STATE_SHIFTDR:
 	case JTAG_STATE_PAUSEIR:
 	case JTAG_STATE_PAUSEDR:
+		byte = 0x00;
 		break;
 	default:
 		pr_err("%s: unstable state %d\n", __func__, endstate);
@@ -257,16 +262,11 @@ static int tap_stableclocks(struct rfdev_device *rfdev,
 	if (err)
 		return err;
 
-	if (endstate == JTAG_STATE_TLRESET) {
-		unsigned int i;
-		for (i = 0; i < cnt / 8; i++)
-			err = i2c_pic_write_byte(rfdev, PIC_WR_TMS_OUT, 0xff);
-		if (cnt % 8)
-			err = i2c_pic_write_bits(rfdev, PIC_WR_TMS_OUT_LEN,
-					0xff, cnt % 8);
-	} else {
-		err = i2c_pic_write_bits(rfdev, PIC_WR_TMS_OUT_LEN, 0, cnt);
-	}
+	for (i = 0; i < cnt / 8; i++)
+		err = i2c_pic_write_byte(rfdev, PIC_WR_TMS_OUT, byte);
+	if (cnt % 8)
+		err = i2c_pic_write_bits(rfdev, PIC_WR_TMS_OUT_LEN,
+				byte, cnt % 8);
 	return err;
 }
 
