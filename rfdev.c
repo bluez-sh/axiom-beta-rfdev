@@ -150,8 +150,8 @@ static struct i2c_client *get_i2c_client(struct rfdev_device *rfdev,
 	return rfdev->client[pic_opr].client;
 };
 
-static int i2c_pic_read(struct rfdev_device *rfdev,
-			enum i2c_client_read_opr opr)
+static int i2c_pic_read_byte(struct rfdev_device *rfdev,
+			     enum i2c_client_read_opr opr)
 {
 	int ret;
 
@@ -161,25 +161,25 @@ static int i2c_pic_read(struct rfdev_device *rfdev,
 	return ret;
 }
 
-static int i2c_pic_write(struct rfdev_device *rfdev,
-			 enum i2c_client_write_opr opr,
-			 uint8_t data,
-			 uint8_t num_bits)
+static int i2c_pic_write_byte(struct rfdev_device *rfdev,
+			      enum i2c_client_write_opr opr,
+			      uint8_t data)
 {
-	int ret;
+	pr_debug("smbus_write %02X <- %02X\n",
+			get_i2c_client(rfdev, opr)->addr, data);
+	return i2c_smbus_write_byte(get_i2c_client(rfdev, opr), data);
+}
 
-	if (!num_bits) {
-		pr_debug("smbus_write %02X <- %02X\n",
-				get_i2c_client(rfdev, opr)->addr, data);
-		ret = i2c_smbus_write_byte(get_i2c_client(rfdev, opr), data);
-	} else {
-		pr_debug("smbus_write %02X <- %02X %02X\n",
-				get_i2c_client(rfdev, opr)->addr,
-				num_bits, data);
-		ret = i2c_smbus_write_byte_data(
-				get_i2c_client(rfdev, opr), num_bits, data);
-	}
-	return ret;
+static int i2c_pic_write_bits(struct rfdev_device *rfdev,
+			      enum i2c_client_write_opr opr,
+			      uint8_t data,
+			      uint8_t num_bits)
+{
+	pr_debug("smbus_write %02X <- %02X %02X\n",
+			get_i2c_client(rfdev, opr)->addr,
+			num_bits, data);
+	return i2c_smbus_write_byte_data(
+			get_i2c_client(rfdev, opr), num_bits, data);
 }
 
 static int i2c_pic_write_block(struct rfdev_device *rfdev,
@@ -215,7 +215,7 @@ static int tap_advance(struct rfdev_device *rfdev, enum jtag_endstate endstate)
 	int err;
 
 	if (rfdev->tap_state > JTAG_STATE_UPDATEIR) {
-		err = i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0xff, 0);
+		err = i2c_pic_write_byte(rfdev, PIC_WR_TMS_OUT, 0xff);
 		if (err)
 			return err;
 		rfdev->tap_state = JTAG_STATE_TLRESET;
@@ -223,9 +223,9 @@ static int tap_advance(struct rfdev_device *rfdev, enum jtag_endstate endstate)
 
 	path = path_table[rfdev->tap_state][endstate];
 	if (path.len == 8)
-		err = i2c_pic_write(rfdev, PIC_WR_TMS_OUT, path.seq, 0);
+		err = i2c_pic_write_byte(rfdev, PIC_WR_TMS_OUT, path.seq);
 	else
-		err = i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN,
+		err = i2c_pic_write_bits(rfdev, PIC_WR_TMS_OUT_LEN,
 				path.seq, path.len);
 	if (err)
 		return err;
@@ -260,12 +260,12 @@ static int tap_stableclocks(struct rfdev_device *rfdev,
 	if (endstate == JTAG_STATE_TLRESET) {
 		unsigned int i;
 		for (i = 0; i < cnt / 8; i++)
-			err = i2c_pic_write(rfdev, PIC_WR_TMS_OUT, 0xff, 0);
+			err = i2c_pic_write_byte(rfdev, PIC_WR_TMS_OUT, 0xff);
 		if (cnt % 8)
-			err = i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN,
+			err = i2c_pic_write_bits(rfdev, PIC_WR_TMS_OUT_LEN,
 					0xff, cnt % 8);
 	} else {
-		err = i2c_pic_write(rfdev, PIC_WR_TMS_OUT_LEN, 0, cnt);
+		err = i2c_pic_write_bits(rfdev, PIC_WR_TMS_OUT_LEN, 0, cnt);
 	}
 	return err;
 }
@@ -275,7 +275,7 @@ static int rf_cmd_in(struct rfdev_device *rfdev,
 		     const uint8_t *op, int num_op)
 {
 	tap_advance(rfdev, JTAG_STATE_SHIFTIR);
-	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, cmd, 0);
+	i2c_pic_write_byte(rfdev, PIC_WR_TDI_OUT, cmd);
 	rfdev->tap_state = JTAG_STATE_EXIT1IR;
 	pr_debug("%s: sent command 0x%02x", __func__, cmd);
 
@@ -286,9 +286,9 @@ static int rf_cmd_in(struct rfdev_device *rfdev,
 
 	tap_advance(rfdev, JTAG_STATE_SHIFTDR);
 	while (num_op-- > 1)
-		i2c_pic_write(rfdev, PIC_WR_TDI_OUT_CONT, op[num_op], 0);
+		i2c_pic_write_byte(rfdev, PIC_WR_TDI_OUT_CONT, op[num_op]);
 
-	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, op[0], 0);
+	i2c_pic_write_byte(rfdev, PIC_WR_TDI_OUT, op[0]);
 	rfdev->tap_state = JTAG_STATE_EXIT1DR;
 
 	tap_stableclocks(rfdev, JTAG_STATE_IDLE, 4);
@@ -300,7 +300,7 @@ static int rf_cmd_out(struct rfdev_device *rfdev,
 		      uint64_t *val, int num_bytes)
 {
 	tap_advance(rfdev, JTAG_STATE_SHIFTIR);
-	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, cmd, 0);
+	i2c_pic_write_byte(rfdev, PIC_WR_TDI_OUT, cmd);
 	rfdev->tap_state = JTAG_STATE_EXIT1IR;
 	pr_debug("%s: sent command 0x%02x", __func__, cmd);
 
@@ -311,9 +311,9 @@ static int rf_cmd_out(struct rfdev_device *rfdev,
 		int byte;
 
 		if (!num_bytes)
-			byte = i2c_pic_read(rfdev, PIC_RD_TDO_IN);
+			byte = i2c_pic_read_byte(rfdev, PIC_RD_TDO_IN);
 		else
-			byte = i2c_pic_read(rfdev, PIC_RD_TDO_IN_CONT);
+			byte = i2c_pic_read_byte(rfdev, PIC_RD_TDO_IN_CONT);
 		if (byte < 0)
 			return byte;
 		*val = (*val << 8) | byte;
@@ -336,9 +336,9 @@ static int rf_tdo_in(struct rfdev_device *rfdev,
 
 	for (i = 0; i < size; i++) {
 		if (i == size - 1 && !cont)
-			byte = i2c_pic_read(rfdev, PIC_RD_TDO_IN);
+			byte = i2c_pic_read_byte(rfdev, PIC_RD_TDO_IN);
 		else
-			byte = i2c_pic_read(rfdev, PIC_RD_TDO_IN_CONT);
+			byte = i2c_pic_read_byte(rfdev, PIC_RD_TDO_IN_CONT);
 		if (byte < 0)
 			return byte;
 		data[i] = rev_byte(byte & 0xff);
@@ -371,13 +371,13 @@ static int rf_tdi_out(struct rfdev_device *rfdev, const uint8_t *data,
 		} else if (num_bits >= BITS_PER_BYTE) {
 			cmd = (num_bits == BITS_PER_BYTE && !cont) ?
 				PIC_WR_TDI_OUT : PIC_WR_TDI_OUT_CONT;
-			err = i2c_pic_write(rfdev, cmd, *data, 0);
+			err = i2c_pic_write_byte(rfdev, cmd, *data);
 			num_bits -= BITS_PER_BYTE;
 			data++;
 		} else {
 			cmd = cont ? PIC_WR_TDI_OUT_LEN_CONT
 				   : PIC_WR_TDI_OUT_LEN;
-			err = i2c_pic_write(rfdev, cmd, *data, num_bits);
+			err = i2c_pic_write_bits(rfdev, cmd, *data, num_bits);
 			num_bits = 0;
 		}
 		if (err)
@@ -402,25 +402,25 @@ static int rf_tdi_tdo(struct rfdev_device *rfdev,
 
 	while (num_bits > 0) {
 		if (num_bits > BITS_PER_BYTE) {
-			ret = i2c_pic_write(rfdev, PIC_WR_TDI_TDO_CONT,
-					*data, 0);
+			ret = i2c_pic_write_byte(rfdev,
+					PIC_WR_TDI_TDO_CONT, *data);
 			num_bits -= BITS_PER_BYTE;
 		} else if (num_bits == BITS_PER_BYTE) {
 			cmd = cont ? PIC_WR_TDI_TDO_CONT
 				   : PIC_WR_TDI_TDO;
-			ret = i2c_pic_write(rfdev, cmd, *data, 0);
+			ret = i2c_pic_write_byte(rfdev, cmd, *data);
 			num_bits = 0;
 		} else {
 			cmd = cont ? PIC_WR_TDI_TDO_LEN_CONT
 				   : PIC_WR_TDI_TDO_LEN;
-			ret = i2c_pic_write(rfdev, cmd, *data, num_bits);
+			ret = i2c_pic_write_bits(rfdev, cmd, *data, num_bits);
 			num_bits = 0;
 		}
 		if (ret < 0)
 			return ret;
 
 		/* shifted out byte */
-		ret = i2c_pic_read(rfdev, PIC_RD_TDI_TDO_IN_VAL);
+		ret = i2c_pic_read_byte(rfdev, PIC_RD_TDI_TDO_IN_VAL);
 		if (ret < 0)
 			return ret;
 
@@ -652,7 +652,7 @@ static int rfdev_fpga_ops_config_init(struct fpga_manager *mgr,
 	get_status(rfdev, &status);
 
 	tap_advance(rfdev, JTAG_STATE_SHIFTIR);
-	i2c_pic_write(rfdev, PIC_WR_TDI_OUT, RF_LSC_BITSTREAM_BURST, 0);
+	i2c_pic_write_byte(rfdev, PIC_WR_TDI_OUT, RF_LSC_BITSTREAM_BURST);
 	rfdev->tap_state = JTAG_STATE_EXIT1IR;
 	pr_debug("%s: sent command 0x%02x", __func__, RF_LSC_BITSTREAM_BURST);
 
@@ -685,7 +685,8 @@ static int rfdev_fpga_ops_config_write(struct fpga_manager *mgr,
 			rbuf[idx] = rev_byte(buf[i + idx]);
 
 		if (c == 1) {
-			err = i2c_pic_write(rfdev, PIC_WR_TDI_OUT, rbuf[0], 0);
+			err = i2c_pic_write_byte(rfdev,
+					PIC_WR_TDI_OUT, rbuf[0]);
 		} else {
 			/* always send one less than maximum here */
 			c--;
@@ -946,8 +947,8 @@ static int rfdev_probe(struct i2c_client *client,
 	i2c_set_clientdata(client, rfdev);
 
 	/* Test read/write from/to the PIC */
-	i2c_pic_write(rfdev, PIC_WR_BUF_DATA, 0xaa, 0);
-	val = i2c_pic_read(rfdev, PIC_RD_BUF_DATA);
+	i2c_pic_write_byte(rfdev, PIC_WR_BUF_DATA, 0xaa);
+	val = i2c_pic_read_byte(rfdev, PIC_RD_BUF_DATA);
 	if (val < 0) {
 		err = val;
 		goto dummy_clean_out;
