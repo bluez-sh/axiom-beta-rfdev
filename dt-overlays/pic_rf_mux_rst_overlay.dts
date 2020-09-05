@@ -1,6 +1,6 @@
 /dts-v1/;
 /plugin/;
-	    
+
 / {
 	fragment@0 {
 		target = <&i2c1>;
@@ -18,7 +18,7 @@
 					#size-cells = <0>;
 					reg = <0>;
 					pic@40 {
-						compatible = "apertus,pic-rfw-interface";
+						compatible = "apertus,pic-rf-interface";
 						reg = <0x40>;
 					};
 				};
@@ -28,7 +28,7 @@
 					#size-cells = <0>;
 					reg = <1>;
 					pic@40 {
-						compatible = "apertus,pic-rfe-interface";
+						compatible = "apertus,pic-rf-interface";
 						reg = <0x40>;
 					};
 				};

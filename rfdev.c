@@ -13,6 +13,7 @@
 #include <linux/fpga/fpga-mgr.h>
 #include <linux/miscdevice.h>
 #include <linux/kdev_t.h>
+#include <linux/list.h>
 #include <crypto/internal/hash.h>
 
 #include "rfdev.h"
@@ -43,16 +44,14 @@
 #define EOVERFL	6 /* overflow error */
 #define ESDMEOF	7 /* SDM EOF */
 
-static struct fpga_manager *rfe_mgr;
-static struct fpga_manager *rfw_mgr;
-static struct miscdevice rfe_misc;
-static struct miscdevice rfw_misc;
-
 struct rfdev_client {
 	struct i2c_client *client;
 };
 
 struct rfdev_device {
+	struct list_head list;
+	struct miscdevice miscdev;
+	struct fpga_manager *mgr;
 	uint8_t digest[DIGEST_SIZE];
 	uint8_t tap_state;
 	unsigned short int num_clients;
@@ -63,6 +62,10 @@ struct sdesc {
 	struct shash_desc shash;
 	char ctx[];
 };
+
+static LIST_HEAD(rfdev_list);
+static int rfdev_count;
+
 
 static inline uint8_t get_err(unsigned long *status)
 {
@@ -144,8 +147,8 @@ static unsigned char rev_byte(unsigned char b)
 	return b;
 }
 
-static struct i2c_client *get_i2c_client(struct rfdev_device *rfdev,
-					 unsigned int pic_opr)
+static inline struct i2c_client *get_i2c_client(struct rfdev_device *rfdev,
+						unsigned int pic_opr)
 {
 	return rfdev->client[pic_opr].client;
 };
@@ -491,13 +494,11 @@ out:
 static ssize_t idcode_show(struct device *dev,
 			   struct device_attribute *attr, char *buf)
 {
-	struct i2c_client *client;
 	struct rfdev_device *rfdev;
 	uint64_t idcode;
 	int err;
 
-	client = dev_get_drvdata(dev);
-	rfdev  = i2c_get_clientdata(client);
+	rfdev = dev_get_drvdata(dev);
 
 	err = rf_cmd_out(rfdev, RF_IDCODE, &idcode, 4);
 	if (err)
@@ -509,15 +510,12 @@ static ssize_t idcode_show(struct device *dev,
 static ssize_t stat_show(struct device *dev,
 			 struct device_attribute *attr, char *buf)
 {
-	struct i2c_client *client;
 	struct rfdev_device *rfdev;
 	unsigned long status;
 	int err;
 
 	pr_debug("%s: called\n", __func__);
-
-	client = dev_get_drvdata(dev);
-	rfdev  = i2c_get_clientdata(client);
+	rfdev = dev_get_drvdata(dev);
 
 	err = get_status(rfdev, &status);
 	if (err)
@@ -529,13 +527,11 @@ static ssize_t stat_show(struct device *dev,
 static ssize_t statstr_show(struct device *dev,
 			    struct device_attribute *attr, char *buf)
 {
-	struct i2c_client *client;
 	struct rfdev_device *rfdev;
 	unsigned long status;
 	int err;
 
-	client = dev_get_drvdata(dev);
-	rfdev  = i2c_get_clientdata(client);
+	rfdev = dev_get_drvdata(dev);
 
 	err = get_status(rfdev, &status);
 	if (err)
@@ -547,12 +543,10 @@ static ssize_t statstr_show(struct device *dev,
 static ssize_t digest_show(struct device *dev,
 			   struct device_attribute *attr, char *buf)
 {
-	struct i2c_client *client;
 	struct rfdev_device *rfdev;
 	unsigned int i, ptr = 0;
 
-	client = dev_get_drvdata(dev);
-	rfdev  = i2c_get_clientdata(client);
+	rfdev = dev_get_drvdata(dev);
 
 	for (i = 0; i < DIGEST_SIZE; i++)
 		ptr += scnprintf(buf + ptr,
@@ -566,13 +560,11 @@ static ssize_t digest_show(struct device *dev,
 static ssize_t traceid_show(struct device *dev,
 			    struct device_attribute *attr, char *buf)
 {
-	struct i2c_client *client;
 	struct rfdev_device *rfdev;
 	uint64_t traceid;
 	int err;
 
-	client = dev_get_drvdata(dev);
-	rfdev  = i2c_get_clientdata(client);
+	rfdev = dev_get_drvdata(dev);
 
 	err = rf_cmd_out(rfdev, RF_UIDCODE_PUB, &traceid, 8);
 	if (err)
@@ -584,13 +576,11 @@ static ssize_t traceid_show(struct device *dev,
 static ssize_t usercode_show(struct device *dev,
 			     struct device_attribute *attr, char *buf)
 {
-	struct i2c_client *client;
 	struct rfdev_device *rfdev;
 	uint64_t usercode;
 	int err;
 
-	client = dev_get_drvdata(dev);
-	rfdev  = i2c_get_clientdata(client);
+	rfdev = dev_get_drvdata(dev);
 
 	err = rf_cmd_out(rfdev, RF_USERCODE, &usercode, 4);
 	if (err)
@@ -629,15 +619,11 @@ static int rfdev_fpga_ops_config_init(struct fpga_manager *mgr,
 				      struct fpga_image_info *info,
 				      const char *buf, size_t count)
 {
-	struct i2c_client *client;
-	struct rfdev_device *rfdev;
+	struct rfdev_device *rfdev = mgr->priv;
 	unsigned long status;
 	int err;
 
 	pr_debug("%s: called\n", __func__);
-
-	client = dev_get_drvdata(&mgr->dev);
-	rfdev  = i2c_get_clientdata(client);
 
 	rf_cmd_in(rfdev, RF_ISC_ENABLE, (uint8_t []) {0x00}, 1);
 	err = wait_not_busy(rfdev);
@@ -667,14 +653,10 @@ err:
 static int rfdev_fpga_ops_config_write(struct fpga_manager *mgr,
 				       const char *buf, size_t count)
 {
-	struct i2c_client *client;
-	struct rfdev_device *rfdev;
+	struct rfdev_device *rfdev = mgr->priv;
 	unsigned char rbuf[33];
 	unsigned int i, idx, c;
 	int err;
-
-	client = dev_get_drvdata(&mgr->dev);
-	rfdev  = i2c_get_clientdata(client);
 
 	calc_hash(buf, count, rfdev->digest);
 
@@ -703,14 +685,10 @@ static int rfdev_fpga_ops_config_write(struct fpga_manager *mgr,
 static int rfdev_fpga_ops_config_complete(struct fpga_manager *mgr,
 					  struct fpga_image_info *info)
 {
-	struct i2c_client *client;
-	struct rfdev_device *rfdev;
+	struct rfdev_device *rfdev = mgr->priv;
 	unsigned long status;
 
 	pr_debug("%s: called\n", __func__);
-
-	client = dev_get_drvdata(&mgr->dev);
-	rfdev  = i2c_get_clientdata(client);
 
 	tap_stableclocks(rfdev, JTAG_STATE_IDLE, 100);
 	get_status(rfdev, &status);
@@ -726,14 +704,10 @@ static int rfdev_fpga_ops_config_complete(struct fpga_manager *mgr,
 
 static enum fpga_mgr_states rfdev_fpga_ops_state(struct fpga_manager *mgr)
 {
-	struct i2c_client *client;
-	struct rfdev_device *rfdev;
+	struct rfdev_device *rfdev = mgr->priv;
 	unsigned long status;
 
 	pr_debug("%s: called\n", __func__);
-
-	client = dev_get_drvdata(&mgr->dev);
-	rfdev  = i2c_get_clientdata(client);
 
 	get_status(rfdev, &status);
 	if (!test_bit(BUSY, &status) && test_bit(DONE, &status) &&
@@ -784,28 +758,28 @@ static int rf_jtag_xfer(struct rfdev_device *rfdev,
 
 static int rfdev_open(struct inode *inode, struct file *file)
 {
-	if (MINOR(inode->i_rdev) == (unsigned int) rfw_misc.minor)
-		file->private_data = &rfw_mgr->dev;
-	else if (MINOR(inode->i_rdev) == (unsigned int) rfe_misc.minor)
-		file->private_data = &rfe_mgr->dev;
-	else
+	struct rfdev_device *rfdev;
+	int minor = MINOR(inode->i_rdev);
+
+	list_for_each_entry(rfdev, &rfdev_list, list) {
+		if (rfdev->miscdev.minor == minor) {
+			file->private_data = rfdev;
+			break;
+		}
+	}
+	if (!file->private_data)
 		return -ENODEV;
 	return nonseekable_open(inode, file);
 }
 
 static long rfdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
-	struct device *dev = file->private_data;
-	struct i2c_client *client;
-	struct rfdev_device *rfdev;
+	struct rfdev_device *rfdev = file->private_data;
 	struct jtag_end_tap_state endstate;
 	struct jtag_xfer xfer;
 	uint8_t *xfer_data;
 	size_t data_size;
 	int err = 0;
-
-	client = dev_get_drvdata(dev);
-	rfdev  = i2c_get_clientdata(client);
 
 	if (!arg)
 		return -EINVAL;
@@ -914,6 +888,7 @@ static int rfdev_probe(struct i2c_client *client,
 {
 	struct device *dev = &client->dev;
 	struct rfdev_device *rfdev;
+	struct fpga_manager *mgr;
 	size_t rfdev_size;
 	unsigned int i;
 	int err, val;
@@ -961,62 +936,48 @@ static int rfdev_probe(struct i2c_client *client,
 		goto dummy_clean_out;
 	}
 
-	/* Register fpga managers and miscdevices */
-	if (!id->driver_data) {
-		rfw_mgr = devm_fpga_mgr_create(dev,
-					"RFWest MachXO2 FPGA Manager",
-					&rfdev_fpga_ops, NULL);
-		if (!rfw_mgr) {
-			err = -ENOMEM;
-			goto dummy_clean_out;
-		}
-		dev_set_drvdata(&rfw_mgr->dev, client);
-		err = fpga_mgr_register(rfw_mgr);
-		if (err) {
-			pr_err("%s: unable to register RFWest FPGA manager\n",
-					__func__);
-			goto dummy_clean_out;
-		}
-
-		rfw_misc.minor = MISC_DYNAMIC_MINOR;
-		rfw_misc.name  = "rfw";
-		rfw_misc.fops  = &rfdev_fops;
-		err = misc_register(&rfw_misc);
-		if (err) {
-			pr_err("%s: can't register rfw miscdevice", __func__);
-			fpga_mgr_unregister(rfw_mgr);
-			goto dummy_clean_out;
-		}
-
-	} else {
-		rfe_mgr = devm_fpga_mgr_create(dev,
-					"RFEast MachXO2 FPGA Manager",
-					&rfdev_fpga_ops, NULL);
-		if (!rfe_mgr) {
-			err = -ENOMEM;
-			goto dummy_clean_out;
-		}
-		dev_set_drvdata(&rfe_mgr->dev, client);
-		err = fpga_mgr_register(rfe_mgr);
-		if (err) {
-			pr_err("%s: unable to register RFEast FPGA manager\n",
-					__func__);
-			goto dummy_clean_out;
-		}
-
-		rfe_misc.minor = MISC_DYNAMIC_MINOR;
-		rfe_misc.name  = "rfe";
-		rfe_misc.fops  = &rfdev_fops;
-		err = misc_register(&rfe_misc);
-		if (err) {
-			pr_err("%s: can't register rfe miscdevice", __func__);
-			fpga_mgr_unregister(rfe_mgr);
-			goto dummy_clean_out;
-		}
+	/* Register miscdevice */
+	rfdev->miscdev.minor = MISC_DYNAMIC_MINOR;
+	rfdev->miscdev.fops  = &rfdev_fops;
+	rfdev->miscdev.name  = kasprintf(GFP_KERNEL, "rfjtag%d", rfdev_count);
+	if (!rfdev->miscdev.name) {
+		err = -ENOMEM;
+		goto dummy_clean_out;
 	}
+	err = misc_register(&rfdev->miscdev);
+	if (err) {
+		pr_err("%s: can't register miscdevice %d\n",
+				__func__, rfdev_count);
+		goto miscdev_name_out;
+	}
+
+	/* Register fpga manager */
+	mgr = devm_fpga_mgr_create(dev, "MachXO2 FPGA Manager",
+			&rfdev_fpga_ops, rfdev);
+	if (!mgr) {
+		err = -ENOMEM;
+		goto miscdev_out;
+	}
+	err = fpga_mgr_register(mgr);
+	if (err) {
+		pr_err("%s: can't register fpga manager %d\n",
+				__func__, rfdev_count);
+		goto miscdev_out;
+	}
+
+	dev_set_drvdata(&mgr->dev, rfdev);
+	rfdev->mgr = mgr;
+
+	/* Add to list of rf devices */
+	list_add_tail(&rfdev->list, &rfdev_list);
+	rfdev_count++;
 
 	return 0;
 
+miscdev_out:
+	misc_deregister(&rfdev->miscdev);
+miscdev_name_out:
+	kfree(rfdev->miscdev.name);
 dummy_clean_out:
 	rfdev_remove_dummy_clients(rfdev);
 	return err;
@@ -1027,33 +988,25 @@ static int rfdev_remove(struct i2c_client *client)
 	struct rfdev_device *rfdev = i2c_get_clientdata(client);
 
 	pr_debug("%s: remove called\n", DEV_NAME);
-
 	reset_fpga(rfdev);
-	if (rfw_mgr) {
-		misc_deregister(&rfw_misc);
-		fpga_mgr_unregister(rfw_mgr);
-		rfw_mgr = NULL;
-	}
-	if (rfe_mgr) {
-		misc_deregister(&rfe_misc);
-		fpga_mgr_unregister(rfe_mgr);
-		rfe_mgr = NULL;
-	}
+
+	misc_deregister(&rfdev->miscdev);
+	kfree(rfdev->miscdev.name);
+
+	fpga_mgr_unregister(rfdev->mgr);
 	rfdev_remove_dummy_clients(rfdev);
 
 	return 0;
 }
 
 static const struct of_device_id rfdev_of_match[] = {
-	{ .compatible = "apertus,pic-rfw-interface" },
-	{ .compatible = "apertus,pic-rfe-interface" },
+	{ .compatible = "apertus,pic-rf-interface" },
 	{ },
 };
 MODULE_DEVICE_TABLE(of, rfdev_of_match);
 
 static const struct i2c_device_id rfdev_idtable[] = {
-	{ "pic-rfw-interface", 0 },
-	{ "pic-rfe-interface", 1 },
+	{ "pic-rf-interface", 0 },
 	{ },
 };
 MODULE_DEVICE_TABLE(i2c, rfdev_idtable);
@@ -1063,7 +1016,7 @@ static struct i2c_driver rfdev_driver = {
 	.remove   = rfdev_remove,
 	.id_table = rfdev_idtable,
 	.driver   = {
-		.name = "rfdev",
+		.name = DEV_NAME,
 		.of_match_table = of_match_ptr(rfdev_of_match),
 		.owner = THIS_MODULE,
 	},
