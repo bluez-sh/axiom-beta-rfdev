@@ -27,7 +27,8 @@ Linux runs on hardened ARM cores in Zynq SoC, which is where the driver comes in
 - RFWest and RFEast can be used seperately for AXIOM Betas with both old and new power board versions
 - A User API based on ioctl is added which exposes a JTAG interface from the FPGAs
   - Can be used by an application like OpenOCD to do SVF replays for programming or debugging<br>
-  - The two devices can be accessed as: <code>/dev/rfw</code> and <code>/dev/rfe</code>
+  - The two devices can be accessed as: <code>/dev/rfjtag0</code> and <code>/dev/rfjtag1</code>
+  - The code was made generic to allow registration of multiple MachXO2 devices in the setup (as */dev/rfjtag#*) and configurable through devicetree entries
 
 Following ioctl commands are defined:<br>
 ```
@@ -69,7 +70,7 @@ A sample .cfg file for OpenOCD then will look like this:
 adapter driver rfdev_jtag
 
 # specify the device file
-rfdev_set_device /dev/rfw
+rfdev_set_device /dev/rfjtag0
 
 # speed must be specified but is not used
 adapter speed 1
