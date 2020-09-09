@@ -52,6 +52,7 @@ struct rfdev_device {
 	struct list_head list;
 	struct miscdevice miscdev;
 	struct fpga_manager *mgr;
+	char *mgr_name;
 	uint8_t digest[DIGEST_SIZE];
 	uint8_t tap_state;
 	unsigned short int num_clients;
@@ -951,18 +952,25 @@ static int rfdev_probe(struct i2c_client *client,
 		goto miscdev_name_out;
 	}
 
+	rfdev->mgr_name = kasprintf(GFP_KERNEL, "%s machxo2 fpga manager",
+			dev->of_node->name);
+	if(!rfdev->mgr_name) {
+		err = -ENOMEM;
+		goto miscdev_out;
+	}
+
 	/* Register fpga manager */
-	mgr = devm_fpga_mgr_create(dev, "MachXO2 FPGA Manager",
+	mgr = devm_fpga_mgr_create(dev, rfdev->mgr_name,
 			&rfdev_fpga_ops, rfdev);
 	if (!mgr) {
 		err = -ENOMEM;
-		goto miscdev_out;
+		goto mgr_name_out;
 	}
 	err = fpga_mgr_register(mgr);
 	if (err) {
 		pr_err("%s: can't register fpga manager %d\n",
 				__func__, rfdev_count);
-		goto miscdev_out;
+		goto mgr_name_out;
 	}
 
 	dev_set_drvdata(&mgr->dev, rfdev);
@@ -974,6 +982,8 @@ static int rfdev_probe(struct i2c_client *client,
 
 	return 0;
 
+mgr_name_out:
+	kfree(rfdev->mgr_name);
 miscdev_out:
 	misc_deregister(&rfdev->miscdev);
 miscdev_name_out:
@@ -990,12 +1000,13 @@ static int rfdev_remove(struct i2c_client *client)
 	pr_debug("%s: remove called\n", DEV_NAME);
 	reset_fpga(rfdev);
 
+	fpga_mgr_unregister(rfdev->mgr);
+	kfree(rfdev->mgr_name);
+
 	misc_deregister(&rfdev->miscdev);
 	kfree(rfdev->miscdev.name);
 
-	fpga_mgr_unregister(rfdev->mgr);
 	rfdev_remove_dummy_clients(rfdev);
-
 	return 0;
 }
 
