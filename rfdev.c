@@ -938,9 +938,10 @@ static int rfdev_probe(struct i2c_client *client,
 	}
 
 	/* Register miscdevice */
-	rfdev->miscdev.minor = MISC_DYNAMIC_MINOR;
-	rfdev->miscdev.fops  = &rfdev_fops;
-	rfdev->miscdev.name  = kasprintf(GFP_KERNEL, "rfjtag%d", rfdev_count);
+	rfdev->miscdev.parent = dev;
+	rfdev->miscdev.minor  = MISC_DYNAMIC_MINOR;
+	rfdev->miscdev.fops   = &rfdev_fops;
+	rfdev->miscdev.name   = kasprintf(GFP_KERNEL, "rfjtag%d", rfdev_count);
 	if (!rfdev->miscdev.name) {
 		err = -ENOMEM;
 		goto dummy_clean_out;
