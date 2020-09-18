@@ -53,8 +53,8 @@ struct rfdev_device {
 	struct miscdevice miscdev;
 	struct fpga_manager *mgr;
 	char *mgr_name;
-	uint8_t digest[DIGEST_SIZE];
-	uint8_t tap_state;
+	u8 digest[DIGEST_SIZE];
+	u8 tap_state;
 	unsigned short int num_clients;
 	struct rfdev_client client[];
 };
@@ -67,13 +67,12 @@ struct sdesc {
 static LIST_HEAD(rfdev_list);
 static int rfdev_count;
 
-
-static inline uint8_t get_err(unsigned long *status)
+static inline u8 get_err(unsigned long *status)
 {
 	return (*status >> ERRBITS) & ERRMASK;
 }
 
-static const char *get_err_string(uint8_t err)
+static const char *get_err_string(u8 err)
 {
 	switch (err) {
 	case ENOERR:	return "No Error";
@@ -94,12 +93,12 @@ static ssize_t parse_status_reg(unsigned long *status, char *buf)
 	/* print debug if buf is NULL */
 	if (!buf) {
 		pr_debug("status: 0x%08lx - done=%d, cfgena=%d, busy=%d, fail=%d, devver=%d, err=%s\n",
-			*status, test_bit(DONE, status),
-			test_bit(ENAB, status),
-			test_bit(BUSY, status),
-			test_bit(FAIL, status),
-			test_bit(DVER, status),
-			get_err_string(get_err(status)));
+			 *status, test_bit(DONE, status),
+			 test_bit(ENAB, status),
+			 test_bit(BUSY, status),
+			 test_bit(FAIL, status),
+			 test_bit(DVER, status),
+			 get_err_string(get_err(status)));
 		return 0;
 	}
 
@@ -161,35 +160,35 @@ static int i2c_pic_read_byte(struct rfdev_device *rfdev,
 
 	ret = i2c_smbus_read_byte(get_i2c_client(rfdev, opr));
 	pr_debug("smbus_read %02X -> %02X\n",
-			get_i2c_client(rfdev, opr)->addr, ret);
+		 get_i2c_client(rfdev, opr)->addr, ret);
 	return ret;
 }
 
 static int i2c_pic_write_byte(struct rfdev_device *rfdev,
 			      enum i2c_client_write_opr opr,
-			      uint8_t data)
+			      u8 data)
 {
 	pr_debug("smbus_write %02X <- %02X\n",
-			get_i2c_client(rfdev, opr)->addr, data);
+		 get_i2c_client(rfdev, opr)->addr, data);
 	return i2c_smbus_write_byte(get_i2c_client(rfdev, opr), data);
 }
 
 static int i2c_pic_write_bits(struct rfdev_device *rfdev,
 			      enum i2c_client_write_opr opr,
-			      uint8_t data,
-			      uint8_t num_bits)
+			      u8 data,
+			      u8 num_bits)
 {
 	pr_debug("smbus_write %02X <- %02X %02X\n",
-			get_i2c_client(rfdev, opr)->addr,
-			num_bits, data);
-	return i2c_smbus_write_byte_data(
-			get_i2c_client(rfdev, opr), num_bits, data);
+		 get_i2c_client(rfdev, opr)->addr,
+		 num_bits, data);
+	return i2c_smbus_write_byte_data(get_i2c_client(rfdev, opr),
+					 num_bits, data);
 }
 
 static int i2c_pic_write_block(struct rfdev_device *rfdev,
 			       enum i2c_client_write_opr opr,
-			       uint8_t cmd, int len,
-			       const uint8_t *data)
+			       u8 cmd, int len,
+			       const u8 *data)
 {
 	char data_str[RF_MAX_TX_SIZE * 3 + 2];
 	unsigned int ptr = 0;
@@ -197,19 +196,19 @@ static int i2c_pic_write_block(struct rfdev_device *rfdev,
 
 	for (i = 0; i < len; i++)
 		ptr += scnprintf(data_str + ptr,
-				sizeof(data_str) - ptr, "%02X ", data[i]);
+				 sizeof(data_str) - ptr, "%02X ", data[i]);
 	if (ptr > 0)
 		data_str[ptr - 1] = '\0';
 	else
 		data_str[0] = '\0';
 
 	pr_debug("smbus_write %02X <- %02X %s\n",
-			get_i2c_client(rfdev, opr)->addr, cmd, data_str);
+		 get_i2c_client(rfdev, opr)->addr, cmd, data_str);
 	if (len <= 0)
 		ret = i2c_smbus_write_byte(get_i2c_client(rfdev, opr), cmd);
 	else
-		ret = i2c_smbus_write_i2c_block_data(
-				get_i2c_client(rfdev, opr), cmd, len, data);
+		ret = i2c_smbus_write_i2c_block_data(get_i2c_client(rfdev, opr),
+						     cmd, len, data);
 	return ret;
 }
 
@@ -230,7 +229,7 @@ static int tap_advance(struct rfdev_device *rfdev, enum jtag_endstate endstate)
 		err = i2c_pic_write_byte(rfdev, PIC_WR_TMS_OUT, path.seq);
 	else
 		err = i2c_pic_write_bits(rfdev, PIC_WR_TMS_OUT_LEN,
-				path.seq, path.len);
+					 path.seq, path.len);
 	if (err)
 		return err;
 	rfdev->tap_state = endstate;
@@ -242,7 +241,7 @@ static int tap_stableclocks(struct rfdev_device *rfdev,
 			    unsigned int cnt)
 {
 	unsigned int i;
-	uint8_t byte;
+	u8 byte;
 	int err = 0;
 
 	switch (endstate) {
@@ -270,13 +269,13 @@ static int tap_stableclocks(struct rfdev_device *rfdev,
 		err = i2c_pic_write_byte(rfdev, PIC_WR_TMS_OUT, byte);
 	if (cnt % 8)
 		err = i2c_pic_write_bits(rfdev, PIC_WR_TMS_OUT_LEN,
-				byte, cnt % 8);
+					 byte, cnt % 8);
 	return err;
 }
 
 static int rf_cmd_in(struct rfdev_device *rfdev,
 		     enum rf_jtag_cmd cmd,
-		     const uint8_t *op, int num_op)
+		     const u8 *op, int num_op)
 {
 	tap_advance(rfdev, JTAG_STATE_SHIFTIR);
 	i2c_pic_write_byte(rfdev, PIC_WR_TDI_OUT, cmd);
@@ -301,7 +300,7 @@ static int rf_cmd_in(struct rfdev_device *rfdev,
 
 static int rf_cmd_out(struct rfdev_device *rfdev,
 		      enum rf_jtag_cmd cmd,
-		      uint64_t *val, int num_bytes)
+		      u64 *val, int num_bytes)
 {
 	tap_advance(rfdev, JTAG_STATE_SHIFTIR);
 	i2c_pic_write_byte(rfdev, PIC_WR_TDI_OUT, cmd);
@@ -328,7 +327,7 @@ static int rf_cmd_out(struct rfdev_device *rfdev,
 }
 
 static int rf_tdo_in(struct rfdev_device *rfdev,
-		     uint8_t *data, int num_bits, int cont)
+		     u8 *data, int num_bits, int cont)
 {
 	int byte;
 	unsigned int i, size;
@@ -355,11 +354,11 @@ static int rf_tdo_in(struct rfdev_device *rfdev,
 	return 0;
 }
 
-static int rf_tdi_out(struct rfdev_device *rfdev, const uint8_t *data,
+static int rf_tdi_out(struct rfdev_device *rfdev, const u8 *data,
 		      int num_bits, int cont)
 {
 	unsigned int b;
-	uint8_t cmd;
+	u8 cmd;
 	int err;
 
 	if (!data || !num_bits)
@@ -369,7 +368,7 @@ static int rf_tdi_out(struct rfdev_device *rfdev, const uint8_t *data,
 		if (num_bits > 2 * BITS_PER_BYTE) {
 			b = min(RF_MAX_TX_SIZE, (num_bits - 1) / BITS_PER_BYTE);
 			err = i2c_pic_write_block(rfdev, PIC_WR_TDI_OUT_CONT,
-					*data, b - 1, data + 1);
+						  *data, b - 1, data + 1);
 			num_bits -= b * BITS_PER_BYTE;
 			data += b;
 		} else if (num_bits >= BITS_PER_BYTE) {
@@ -396,9 +395,9 @@ static int rf_tdi_out(struct rfdev_device *rfdev, const uint8_t *data,
 }
 
 static int rf_tdi_tdo(struct rfdev_device *rfdev,
-		      uint8_t *data, int num_bits, int cont)
+		      u8 *data, int num_bits, int cont)
 {
-	uint8_t cmd;
+	u8 cmd;
 	int ret;
 
 	if (!data || !num_bits)
@@ -407,7 +406,7 @@ static int rf_tdi_tdo(struct rfdev_device *rfdev,
 	while (num_bits > 0) {
 		if (num_bits > BITS_PER_BYTE) {
 			ret = i2c_pic_write_byte(rfdev,
-					PIC_WR_TDI_TDO_CONT, *data);
+						 PIC_WR_TDI_TDO_CONT, *data);
 			num_bits -= BITS_PER_BYTE;
 		} else if (num_bits == BITS_PER_BYTE) {
 			cmd = cont ? PIC_WR_TDI_TDO_CONT
@@ -441,20 +440,20 @@ static int rf_tdi_tdo(struct rfdev_device *rfdev,
 
 static int get_status(struct rfdev_device *rfdev, unsigned long *status)
 {
-	uint64_t tmp;
+	u64 tmp;
 	int err;
 
 	err = rf_cmd_out(rfdev, RF_LSC_READ_STATUS, &tmp, 4);
 	if (err)
 		return err;
-	*status = (uint32_t) tmp;
+	*status = (u32)tmp;
 	parse_status_reg(status, NULL);
 	return 0;
 }
 
 static int wait_not_busy(struct rfdev_device *rfdev)
 {
-	uint64_t val;
+	u64 val;
 	int loop = 0;
 	int err;
 
@@ -462,11 +461,11 @@ static int wait_not_busy(struct rfdev_device *rfdev)
 		err = rf_cmd_out(rfdev, RF_LSC_CHECK_BUSY, &val, 1);
 		if (err)
 			return err;
-		pr_debug("%s: received 0x%02x\n", __func__, (uint8_t) val);
+		pr_debug("%s: received 0x%02x\n", __func__, (u8)val);
 
 		if (++loop >= RF_MAX_BSY_LOOP)
 			return -EBUSY;
-	} while (test_bit(7, (unsigned long *) &val));
+	} while (test_bit(7, (unsigned long *)&val));
 
 	return 0;
 }
@@ -475,7 +474,7 @@ static void reset_fpga(struct rfdev_device *rfdev)
 {
 	unsigned long status;
 
-	rf_cmd_in(rfdev, RF_LSC_REFRESH, (uint8_t []) {0x00}, 1);
+	rf_cmd_in(rfdev, RF_LSC_REFRESH, (u8 []) {0x00}, 1);
 	if (wait_not_busy(rfdev) < 0)
 		goto fail;
 
@@ -496,7 +495,7 @@ static ssize_t idcode_show(struct device *dev,
 			   struct device_attribute *attr, char *buf)
 {
 	struct rfdev_device *rfdev;
-	uint64_t idcode;
+	u64 idcode;
 	int err;
 
 	rfdev = dev_get_drvdata(dev);
@@ -505,7 +504,7 @@ static ssize_t idcode_show(struct device *dev,
 	if (err)
 		return err;
 
-	return scnprintf(buf, PAGE_SIZE, "0x%08x\n", (uint32_t) idcode);
+	return scnprintf(buf, PAGE_SIZE, "0x%08x\n", (u32)idcode);
 }
 
 static ssize_t stat_show(struct device *dev,
@@ -549,8 +548,8 @@ static ssize_t digest_show(struct device *dev,
 	rfdev = dev_get_drvdata(dev);
 
 	for (i = 0; i < DIGEST_SIZE; i++)
-		ptr += scnprintf(buf + ptr,
-				PAGE_SIZE - ptr, "%02x", rfdev->digest[i]);
+		ptr += scnprintf(buf + ptr, PAGE_SIZE - ptr,
+				 "%02x", rfdev->digest[i]);
 	buf[ptr]     = '\n';
 	buf[ptr + 1] = '\0';
 
@@ -561,7 +560,7 @@ static ssize_t traceid_show(struct device *dev,
 			    struct device_attribute *attr, char *buf)
 {
 	struct rfdev_device *rfdev;
-	uint64_t traceid;
+	u64 traceid;
 	int err;
 
 	rfdev = dev_get_drvdata(dev);
@@ -577,7 +576,7 @@ static ssize_t usercode_show(struct device *dev,
 			     struct device_attribute *attr, char *buf)
 {
 	struct rfdev_device *rfdev;
-	uint64_t usercode;
+	u64 usercode;
 	int err;
 
 	rfdev = dev_get_drvdata(dev);
@@ -586,7 +585,7 @@ static ssize_t usercode_show(struct device *dev,
 	if (err)
 		return err;
 
-	return scnprintf(buf, PAGE_SIZE, "0x%08x\n", (uint32_t) usercode);
+	return scnprintf(buf, PAGE_SIZE, "0x%08x\n", (u32)usercode);
 }
 
 static DEVICE_ATTR_RO(idcode);
@@ -623,12 +622,12 @@ static int rfdev_fpga_ops_config_init(struct fpga_manager *mgr,
 	unsigned long status;
 	int err;
 
-	rf_cmd_in(rfdev, RF_ISC_ENABLE, (uint8_t []) {0x00}, 1);
+	rf_cmd_in(rfdev, RF_ISC_ENABLE, (u8 []) {0x00}, 1);
 	err = wait_not_busy(rfdev);
 	if (err)
 		goto err;
 
-	rf_cmd_in(rfdev, RF_ISC_ERASE,  (uint8_t []) {0x01}, 1);
+	rf_cmd_in(rfdev, RF_ISC_ERASE,  (u8 []) {0x01}, 1);
 	err = wait_not_busy(rfdev);
 	if (err)
 		goto err;
@@ -666,12 +665,12 @@ static int rfdev_fpga_ops_config_write(struct fpga_manager *mgr,
 
 		if (c == 1) {
 			err = i2c_pic_write_byte(rfdev,
-					PIC_WR_TDI_OUT, rbuf[0]);
+						 PIC_WR_TDI_OUT, rbuf[0]);
 		} else {
 			/* always send one less than maximum here */
 			c--;
 			err = i2c_pic_write_block(rfdev, PIC_WR_TDI_OUT_CONT,
-					rbuf[0], c - 1, &rbuf[1]);
+						  rbuf[0], c - 1, &rbuf[1]);
 		}
 		if (err)
 			return err;
@@ -720,7 +719,7 @@ static const struct fpga_manager_ops rfdev_fpga_ops = {
 };
 
 static int rf_jtag_xfer(struct rfdev_device *rfdev,
-			struct jtag_xfer *xfer, uint8_t *data)
+			struct jtag_xfer *xfer, u8 *data)
 {
 	int ret, cont;
 
@@ -771,7 +770,7 @@ static long rfdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	struct rfdev_device *rfdev = file->private_data;
 	struct jtag_end_tap_state endstate;
 	struct jtag_xfer xfer;
-	uint8_t *xfer_data;
+	u8 *xfer_data;
 	size_t data_size;
 	int err = 0;
 
@@ -780,11 +779,11 @@ static long rfdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 	switch (cmd) {
 	case JTAG_GIOCENDSTATE:
-		err = put_user(rfdev->tap_state, (uint32_t __user *)arg);
+		err = put_user(rfdev->tap_state, (u32 __user *)arg);
 		break;
 	case JTAG_SIOCSTATE:
 		if (copy_from_user(&endstate, (const void __user *)arg,
-					sizeof(struct jtag_end_tap_state)))
+				   sizeof(struct jtag_end_tap_state)))
 			return -EFAULT;
 
 		if (endstate.endstate > JTAG_STATE_UPDATEIR)
@@ -798,12 +797,12 @@ static long rfdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 		err = tap_advance(rfdev, endstate.endstate);
 		if (endstate.tck)
-			err = tap_stableclocks(rfdev,
-					endstate.endstate, endstate.tck);
+			err = tap_stableclocks(rfdev, endstate.endstate,
+					       endstate.tck);
 		break;
 	case JTAG_IOCXFER:
 		if (copy_from_user(&xfer, (const void __user *)arg,
-					sizeof(struct jtag_xfer)))
+				   sizeof(struct jtag_xfer)))
 			return -EFAULT;
 
 		if (xfer.length >= JTAG_MAX_XFER_DATA_LEN)
@@ -827,13 +826,13 @@ static long rfdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		}
 
 		err = copy_to_user(u64_to_user_ptr(xfer.tdio),
-					(void *)xfer_data, data_size);
+				   (void *)xfer_data, data_size);
 		kfree(xfer_data);
 		if (err)
 			return -EFAULT;
 
 		if (copy_to_user((void __user *)arg, (void *)&xfer,
-					sizeof(struct jtag_xfer)))
+				 sizeof(struct jtag_xfer)))
 			return -EFAULT;
 		break;
 	default:
@@ -890,8 +889,10 @@ static int rfdev_probe(struct i2c_client *client,
 	pr_debug("%s: probe\n", DEV_NAME);
 
 	if (!i2c_check_functionality(client->adapter,
-		I2C_FUNC_SMBUS_BYTE | I2C_FUNC_SMBUS_BYTE_DATA |
-		I2C_FUNC_SMBUS_WORD_DATA | I2C_FUNC_SMBUS_I2C_BLOCK)) {
+				     I2C_FUNC_SMBUS_BYTE |
+				     I2C_FUNC_SMBUS_BYTE_DATA |
+				     I2C_FUNC_SMBUS_WORD_DATA |
+				     I2C_FUNC_SMBUS_I2C_BLOCK)) {
 		dev_err(dev, "required i2c functionality is not supported\n");
 		return -ENODEV;
 	}
@@ -944,7 +945,7 @@ static int rfdev_probe(struct i2c_client *client,
 	}
 
 	rfdev->mgr_name = kasprintf(GFP_KERNEL, "%s machxo2 fpga manager",
-			dev->of_node->name);
+				    dev->of_node->name);
 	if (!rfdev->mgr_name) {
 		err = -ENOMEM;
 		goto miscdev_out;
@@ -952,7 +953,7 @@ static int rfdev_probe(struct i2c_client *client,
 
 	/* Register fpga manager */
 	mgr = devm_fpga_mgr_create(dev, rfdev->mgr_name,
-			&rfdev_fpga_ops, rfdev);
+				   &rfdev_fpga_ops, rfdev);
 	if (!mgr) {
 		err = -ENOMEM;
 		goto mgr_name_out;

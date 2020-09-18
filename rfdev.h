@@ -93,8 +93,7 @@ enum rf_jtag_cmd {
 };
 
 struct jtag_path {
-	uint8_t seq;
-	uint8_t len;
+	u8 seq, len;
 };
 
 struct jtag_path path_table[16][16] = {
