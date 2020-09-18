@@ -515,7 +515,6 @@ static ssize_t stat_show(struct device *dev,
 	unsigned long status;
 	int err;
 
-	pr_debug("%s: called\n", __func__);
 	rfdev = dev_get_drvdata(dev);
 
 	err = get_status(rfdev, &status);
@@ -624,8 +623,6 @@ static int rfdev_fpga_ops_config_init(struct fpga_manager *mgr,
 	unsigned long status;
 	int err;
 
-	pr_debug("%s: called\n", __func__);
-
 	rf_cmd_in(rfdev, RF_ISC_ENABLE, (uint8_t []) {0x00}, 1);
 	err = wait_not_busy(rfdev);
 	if (err)
@@ -689,8 +686,6 @@ static int rfdev_fpga_ops_config_complete(struct fpga_manager *mgr,
 	struct rfdev_device *rfdev = mgr->priv;
 	unsigned long status;
 
-	pr_debug("%s: called\n", __func__);
-
 	tap_stableclocks(rfdev, JTAG_STATE_IDLE, 100);
 	get_status(rfdev, &status);
 
@@ -707,8 +702,6 @@ static enum fpga_mgr_states rfdev_fpga_ops_state(struct fpga_manager *mgr)
 {
 	struct rfdev_device *rfdev = mgr->priv;
 	unsigned long status;
-
-	pr_debug("%s: called\n", __func__);
 
 	get_status(rfdev, &status);
 	if (!test_bit(BUSY, &status) && test_bit(DONE, &status) &&
@@ -894,13 +887,12 @@ static int rfdev_probe(struct i2c_client *client,
 	unsigned int i;
 	int err, val;
 
-	pr_debug("%s: called\n", __func__);
+	pr_debug("%s: probe\n", DEV_NAME);
 
 	if (!i2c_check_functionality(client->adapter,
 		I2C_FUNC_SMBUS_BYTE | I2C_FUNC_SMBUS_BYTE_DATA |
 		I2C_FUNC_SMBUS_WORD_DATA | I2C_FUNC_SMBUS_I2C_BLOCK)) {
-		pr_err("%s: required i2c functionality is not supported\n",
-			__func__);
+		dev_err(dev, "required i2c functionality is not supported\n");
 		return -ENODEV;
 	}
 
@@ -931,8 +923,7 @@ static int rfdev_probe(struct i2c_client *client,
 	}
 
 	if ((val & 0xff) != 0xaa) {
-		pr_err("%s: read/write test failed, received byte 0x%02x\n",
-				__func__, val);
+		dev_err(dev, "read/write test failed, received 0x%02x\n", val);
 		err = -EIO;
 		goto dummy_clean_out;
 	}
@@ -948,14 +939,13 @@ static int rfdev_probe(struct i2c_client *client,
 	}
 	err = misc_register(&rfdev->miscdev);
 	if (err) {
-		pr_err("%s: can't register miscdevice %d\n",
-				__func__, rfdev_count);
+		dev_err(dev, "can't register miscdevice\n");
 		goto miscdev_name_out;
 	}
 
 	rfdev->mgr_name = kasprintf(GFP_KERNEL, "%s machxo2 fpga manager",
 			dev->of_node->name);
-	if(!rfdev->mgr_name) {
+	if (!rfdev->mgr_name) {
 		err = -ENOMEM;
 		goto miscdev_out;
 	}
@@ -969,8 +959,7 @@ static int rfdev_probe(struct i2c_client *client,
 	}
 	err = fpga_mgr_register(mgr);
 	if (err) {
-		pr_err("%s: can't register fpga manager %d\n",
-				__func__, rfdev_count);
+		dev_err(dev, "can't register fpga manager\n");
 		goto mgr_name_out;
 	}
 
@@ -998,7 +987,7 @@ static int rfdev_remove(struct i2c_client *client)
 {
 	struct rfdev_device *rfdev = i2c_get_clientdata(client);
 
-	pr_debug("%s: remove called\n", DEV_NAME);
+	pr_debug("%s: remove\n", DEV_NAME);
 	reset_fpga(rfdev);
 
 	fpga_mgr_unregister(rfdev->mgr);
