@@ -346,11 +346,12 @@ static int rf_tdo_in(struct rfdev_device *rfdev,
 			return byte;
 		data[i] = rev_byte(byte & 0xff);
 	}
-	if (!cont)
+	if (!cont) {
 		if (rfdev->tap_state == JTAG_STATE_SHIFTDR)
 			rfdev->tap_state = JTAG_STATE_EXIT1DR;
 		else
 			rfdev->tap_state = JTAG_STATE_EXIT1IR;
+	}
 	return 0;
 }
 
@@ -386,11 +387,12 @@ static int rf_tdi_out(struct rfdev_device *rfdev, const u8 *data,
 		if (err)
 			return err;
 	}
-	if (!cont)
+	if (!cont) {
 		if (rfdev->tap_state == JTAG_STATE_SHIFTDR)
 			rfdev->tap_state = JTAG_STATE_EXIT1DR;
 		else
 			rfdev->tap_state = JTAG_STATE_EXIT1IR;
+	}
 	return 0;
 }
 
@@ -430,11 +432,12 @@ static int rf_tdi_tdo(struct rfdev_device *rfdev,
 		*data = rev_byte(ret & 0xff);
 		data++;
 	}
-	if (!cont)
+	if (!cont) {
 		if (rfdev->tap_state == JTAG_STATE_SHIFTDR)
 			rfdev->tap_state = JTAG_STATE_EXIT1DR;
 		else
 			rfdev->tap_state = JTAG_STATE_EXIT1IR;
+	}
 	return 0;
 }
 
@@ -658,7 +661,7 @@ static int rfdev_fpga_ops_config_write(struct fpga_manager *mgr,
 	calc_hash(buf, count, rfdev->digest);
 
 	for (i = 0; i < count; i += c) {
-		c = min(33, count - i);
+		c = min(33, (int)(count - i));
 
 		for (idx = 0; idx < c; idx++)
 			rbuf[idx] = rev_byte(buf[i + idx]);
@@ -858,7 +861,7 @@ static int rfdev_make_dummy_client(struct rfdev_device *rfdev,
 	dev = &base_client->dev;
 	addr = base_client->addr + index;
 
-	dummy_client = i2c_new_dummy(base_client->adapter, addr);
+	dummy_client = i2c_new_dummy_device(base_client->adapter, addr);
 	if (!dummy_client) {
 		dev_err(dev, "address 0x%02x unavailable\n", addr);
 		return -EADDRINUSE;
