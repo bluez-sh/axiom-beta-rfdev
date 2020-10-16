@@ -52,7 +52,6 @@ struct rfdev_device {
 	struct list_head list;
 	struct miscdevice miscdev;
 	struct fpga_manager *mgr;
-	char *mgr_name;
 	u8 digest[DIGEST_SIZE];
 	u8 tap_state;
 	unsigned short int num_clients;
@@ -118,21 +117,26 @@ static int calc_hash(const unsigned char *data, size_t len,
 
 	alg = crypto_alloc_shash(DIGEST_NAME, CRYPTO_ALG_TYPE_SHASH, 0);
 	if (IS_ERR(alg)) {
-		pr_info("can't allocate hash algorithm\n");
+		pr_err("can't allocate hash algorithm\n");
 		return PTR_ERR(alg);
+	}
+
+	if (crypto_shash_digestsize(alg) != DIGEST_SIZE) {
+		pr_err("digest size does not match buffer size\n");
+		return -EINVAL;
 	}
 
 	size = sizeof(struct shash_desc) + crypto_shash_descsize(alg);
 	sdesc = kmalloc(size, GFP_KERNEL);
 	if (!sdesc) {
-		pr_info("can't allocate sdesc\n");
+		pr_err("can't allocate sdesc\n");
 		return -ENOMEM;
 	}
 	sdesc->shash.tfm = alg;
 
 	ret = crypto_shash_digest(&sdesc->shash, data, len, digest);
 	if (ret < 0)
-		pr_info("can't calculate digest\n");
+		pr_err("can't calculate digest\n");
 
 	kfree(sdesc);
 	crypto_free_shash(alg);
@@ -861,7 +865,8 @@ static int rfdev_make_dummy_client(struct rfdev_device *rfdev,
 	dev = &base_client->dev;
 	addr = base_client->addr + index;
 
-	dummy_client = i2c_new_dummy_device(base_client->adapter, addr);
+	dummy_client = devm_i2c_new_dummy_device(dev, base_client->adapter,
+						 addr);
 	if (!dummy_client) {
 		dev_err(dev, "address 0x%02x unavailable\n", addr);
 		return -EADDRINUSE;
@@ -871,14 +876,6 @@ static int rfdev_make_dummy_client(struct rfdev_device *rfdev,
 	return 0;
 }
 
-static void rfdev_remove_dummy_clients(struct rfdev_device *rfdev)
-{
-	int i;
-
-	for (i = 1; i < rfdev->num_clients; i++)
-		i2c_unregister_device(rfdev->client[i].client);
-}
-
 static int rfdev_probe(struct i2c_client *client,
 		       const struct i2c_device_id *id)
 {
@@ -886,6 +883,7 @@ static int rfdev_probe(struct i2c_client *client,
 	struct rfdev_device *rfdev;
 	struct fpga_manager *mgr;
 	size_t rfdev_size;
+	char *mgr_name;
 	unsigned int i;
 	int err, val;
 
@@ -913,7 +911,7 @@ static int rfdev_probe(struct i2c_client *client,
 	for (i = 1; i < PIC_NUM_ADDRS; i++) {
 		err = rfdev_make_dummy_client(rfdev, i);
 		if (err)
-			goto dummy_clean_out;
+			return err;
 	}
 
 	i2c_set_clientdata(client, rfdev);
@@ -921,50 +919,46 @@ static int rfdev_probe(struct i2c_client *client,
 	/* Test read/write from/to the PIC */
 	i2c_pic_write_byte(rfdev, PIC_WR_BUF_DATA, 0xaa);
 	val = i2c_pic_read_byte(rfdev, PIC_RD_BUF_DATA);
-	if (val < 0) {
-		err = val;
-		goto dummy_clean_out;
-	}
+	if (val < 0)
+		return val;
 
 	if ((val & 0xff) != 0xaa) {
 		dev_err(dev, "read/write test failed, received 0x%02x\n", val);
-		err = -EIO;
-		goto dummy_clean_out;
+		return -EIO;
 	}
 
 	/* Register miscdevice */
 	rfdev->miscdev.parent = dev;
 	rfdev->miscdev.minor  = MISC_DYNAMIC_MINOR;
 	rfdev->miscdev.fops   = &rfdev_fops;
-	rfdev->miscdev.name   = kasprintf(GFP_KERNEL, "rfjtag%d", rfdev_count);
-	if (!rfdev->miscdev.name) {
-		err = -ENOMEM;
-		goto dummy_clean_out;
-	}
+	rfdev->miscdev.name   = devm_kasprintf(dev, GFP_KERNEL, "rfjtag%d",
+					       rfdev_count);
+	if (!rfdev->miscdev.name)
+		return -ENOMEM;
+
 	err = misc_register(&rfdev->miscdev);
 	if (err) {
 		dev_err(dev, "can't register miscdevice\n");
-		goto miscdev_name_out;
+		return err;
 	}
 
-	rfdev->mgr_name = kasprintf(GFP_KERNEL, "%s machxo2 fpga manager",
-				    dev->of_node->name);
-	if (!rfdev->mgr_name) {
+	mgr_name = devm_kasprintf(dev, GFP_KERNEL, "%s machxo2 fpga manager",
+				  dev->of_node->name);
+	if (!mgr_name) {
 		err = -ENOMEM;
 		goto miscdev_out;
 	}
 
 	/* Register fpga manager */
-	mgr = devm_fpga_mgr_create(dev, rfdev->mgr_name,
-				   &rfdev_fpga_ops, rfdev);
+	mgr = devm_fpga_mgr_create(dev, mgr_name, &rfdev_fpga_ops, rfdev);
 	if (!mgr) {
 		err = -ENOMEM;
-		goto mgr_name_out;
+		goto miscdev_out;
 	}
 	err = fpga_mgr_register(mgr);
 	if (err) {
 		dev_err(dev, "can't register fpga manager\n");
-		goto mgr_name_out;
+		goto miscdev_out;
 	}
 
 	dev_set_drvdata(&mgr->dev, rfdev);
@@ -976,14 +970,8 @@ static int rfdev_probe(struct i2c_client *client,
 
 	return 0;
 
-mgr_name_out:
-	kfree(rfdev->mgr_name);
 miscdev_out:
 	misc_deregister(&rfdev->miscdev);
-miscdev_name_out:
-	kfree(rfdev->miscdev.name);
-dummy_clean_out:
-	rfdev_remove_dummy_clients(rfdev);
 	return err;
 }
 
@@ -992,15 +980,10 @@ static int rfdev_remove(struct i2c_client *client)
 	struct rfdev_device *rfdev = i2c_get_clientdata(client);
 
 	pr_debug("%s: remove\n", DEV_NAME);
+
 	reset_fpga(rfdev);
-
 	fpga_mgr_unregister(rfdev->mgr);
-	kfree(rfdev->mgr_name);
-
 	misc_deregister(&rfdev->miscdev);
-	kfree(rfdev->miscdev.name);
-
-	rfdev_remove_dummy_clients(rfdev);
 	return 0;
 }
 
