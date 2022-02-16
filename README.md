@@ -91,3 +91,6 @@ Then run with something like:<br>
 8. <code>make</code> (or <code>make clean</code>)
 
 Note: <code>make native</code> & <code>make clean_native</code> compiles against currently running kernel in your system (just used for testing build)
+```diff
+- Comment out the call to reset_fpga() inside rfdev_remove() in rfdev.c before compiling to avoid triggering a reset on driver unload 
+```
